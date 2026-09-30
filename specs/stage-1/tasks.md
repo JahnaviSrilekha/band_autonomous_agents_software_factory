@@ -37,7 +37,7 @@ files live under `stage-1/src/pocketful/`. Status starts `pending`; developer fl
 | id | reqs | files | deps | done test | status | batch |
 |---|---|---|---|---|---|---|
 | T14 | R76,R77 | `src/pocketful/shares.py` | T1 | All 5 table rows from R76 exact; order-dependence (reordering `participant_handles` moves the extra unit) | done | 4 |
-| T15 | R71,R72,R73,R74 | `src/pocketful/handlers/splits.py` | T9,T14 | Case table from R73; caller-only split → `requests: []`; shares sum to amount and cover every participant in order; requests cover every non-caller participant | pending | 4 |
+| T15 | R71,R72,R73,R74 | `src/pocketful/handlers/splits.py` | T9,T14 | Case table from R73; caller-only split → `requests: []`; shares sum to amount and cover every participant in order; requests cover every non-caller participant | done | 4 |
 | T16 | R86,R87,R88,R89,R90,R91,R92,R93 | `src/pocketful/handlers/settlements.py` | T8 | No-token → 401; non-operator → 403; per-entry errors (unknown handle/self-transfer/malformed) take precedence over collective affordability, in input order; net-affordability check (not sequential); all-or-nothing on rejection (idempotency key freed, no payments created); replay → 200 original; settlement payments carry `settlement_id`, null `request_id`, shared `created_at`==`committed_at` | pending | 4 |
 
 ## Batch 5 — export/import, concurrency hardening, verification
