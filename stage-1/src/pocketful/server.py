@@ -34,9 +34,12 @@ ROUTES.append(Route("GET", r"^/health$", _health))
 
 
 def _add_reset_route():
+    from .handlers.export_import import handle_export, handle_import
     from .reset import handle_reset
 
     ROUTES.append(Route("POST", r"^/_test/reset$", handle_reset))
+    ROUTES.append(Route("GET", r"^/_test/export$", handle_export))
+    ROUTES.append(Route("POST", r"^/_test/import$", handle_import))
 
 
 _add_reset_route()
