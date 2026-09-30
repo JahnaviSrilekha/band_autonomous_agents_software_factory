@@ -74,3 +74,41 @@ def pay_request(user, body, params, query):
         request.status = "paid"
         request.payment_id = payment.id
         return 201, payment_json(state, payment)
+
+
+def decline_request(user, body, params, query):
+    with STATE_LOCK:
+        state = state_module.STATE
+        fresh = state.users.get(user.id)
+        if fresh is None:
+            raise ApiError(401, "unauthenticated", "session no longer valid")
+        request = state.requests.get(params["id"])
+        if request is None:
+            raise ApiError(404, "not_found", "no such request")
+        if request.payer_id != fresh.id:
+            raise ApiError(403, "forbidden", "only the payer may decline this request")
+        if request.status == "declined":
+            return 200, request_json(state, request)
+        if request.status != "pending":
+            raise ApiError(409, "request_not_pending", "request is not pending")
+        request.status = "declined"
+        return 200, request_json(state, request)
+
+
+def cancel_request(user, body, params, query):
+    with STATE_LOCK:
+        state = state_module.STATE
+        fresh = state.users.get(user.id)
+        if fresh is None:
+            raise ApiError(401, "unauthenticated", "session no longer valid")
+        request = state.requests.get(params["id"])
+        if request is None:
+            raise ApiError(404, "not_found", "no such request")
+        if request.requester_id != fresh.id:
+            raise ApiError(403, "forbidden", "only the requester may cancel this request")
+        if request.status == "cancelled":
+            return 200, request_json(state, request)
+        if request.status != "pending":
+            raise ApiError(409, "request_not_pending", "request is not pending")
+        request.status = "cancelled"
+        return 200, request_json(state, request)
