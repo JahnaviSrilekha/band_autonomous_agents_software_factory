@@ -52,6 +52,19 @@ other thread last swept the table.
 computed, never stored: `0` if `status != "open"` or the record is clock-expired, else
 `amount - captured_amount`.
 
+**Seeding** (reset/import loader, A22): a seeded `status: "expired"` is stored as `"open"`
+if its `expires_at` is already ≤ reset time (so §9's `is_live_hold` correctly treats it as
+expired on the next read), else it's a fixture-validation error (422, unchanged state) — a
+future-dated `"expired"` seed is contradictory. Seeded `"captured"`/`"voided"` records
+default `captured_amount: 0`, `payment_ids: []` when the fixture doesn't supply them (it
+has no field to). A seeded `from_user_id == to_user_id`, or either id unknown, is a 422
+fixture-validation error, same as an unknown handle elsewhere in a fixture.
+
+**`GET /authorizations` response** (A21): `{"authorizations": [<item>...], "has_more":
+bool}`, each `<item>` the same representation `POST /authorizations`/`.../capture` return
+(this §3 shape, JSON-serialized) — the same "one item shape, reused everywhere" rule
+stage-1 design applies to payments.
+
 ## 4. Invariants and where they are enforced — additions
 
 | Invariant | Enforcement |
@@ -76,10 +89,12 @@ state, not an error — R148) without needing the idempotency-key machinery at a
 ## 6. Canonical body comparison
 
 Unchanged from stage-1 design §6 (the JSON-type-aware comparison, bool-vs-number-safe).
-Reused as-is for `POST /authorizations` and `.../capture` bodies. R146 is explicit that the
-new *response* fields (`remaining_amount`, `payment_ids`, `final`'s echoed value) never
-enter this comparison — only the *request* body is ever compared for replay/reuse
-purposes, exactly as for every other write path.
+Reused as-is for `POST /authorizations` and `.../capture` bodies. The new *response* fields
+(`remaining_amount`, `payment_ids` — `final` itself is never echoed in any response, A23)
+never enter this comparison — only the *request* body is ever compared for replay/reuse
+purposes, exactly as for every other write path. A non-boolean `final` in the request is a
+`400 malformed_request` (A24), checked at the same body-shape-gate step as every other
+wrong-typed field with no endpoint-specific override.
 
 ## 7. Rounding function
 
