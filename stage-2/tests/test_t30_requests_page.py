@@ -60,7 +60,7 @@ class TestT30RequestsPage(unittest.TestCase):
     def test_empty_requests_iff_both_lists_empty(self):
         status, body, _ = _get(self.port, "/requests", self.token)
         text = body.decode()
-        self.assertIn('data-testid="empty-requests" hidden', text)
+        self.assertIn('data-testid="empty-requests">', text)
 
 
 if __name__ == "__main__":

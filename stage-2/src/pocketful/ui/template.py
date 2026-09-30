@@ -25,6 +25,15 @@ def format_when(iso_text):
         return iso_text or ""
 
 
+def minor_to_decimal(minor, minor_units):
+    minor = int(minor)
+    value = abs(minor)
+    if minor_units <= 0:
+        return str(value)
+    digits = str(value).rjust(minor_units + 1, "0")
+    return f"{digits[:-minor_units]}.{digits[-minor_units:]}"
+
+
 class HtmlDocument:
     def __init__(self, html_text, status=200):
         self.status = status

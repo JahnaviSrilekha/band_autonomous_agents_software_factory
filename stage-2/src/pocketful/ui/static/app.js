@@ -104,6 +104,11 @@
     };
   }
 
+  var WALLET_SEQ = sequencer();
+  var FEED_SEQ = sequencer();
+  var REQUEST_SEQ = sequencer();
+  var AUTH_SEQ = sequencer();
+
   function api(path, options) {
     options = options || {};
     var controller = new AbortController();
@@ -173,6 +178,11 @@
 
   function testid(id) { return '[data-testid="' + id + '"]'; }
 
+  function myHandle() {
+    var node = body.querySelector(testid("current-handle"));
+    return node ? node.textContent : "";
+  }
+
   function setAmount(node, minor) {
     node.textContent = formatMinor(minor);
     node.setAttribute("data-amount", String(Math.trunc(minor)));
@@ -205,6 +215,12 @@
     }
   }
 
+  function mainSide() {
+    var main = el("div", "list__main");
+    var side = el("div", "list__side");
+    return { main: main, side: side, item: el("li", "list__item") };
+  }
+
   function renderFeed(payments) {
     var list = body.querySelector(testid("activity-list"));
     var empty = body.querySelector(testid("empty-activity"));
@@ -212,27 +228,25 @@
     list.textContent = "";
     payments.forEach(function (payment) {
       var id = payment.payment_id;
-      var item = el("li", "list__item");
-      item.setAttribute("data-testid", "activity-item-" + id);
-      item.setAttribute("data-visibility", payment.visibility);
-      var main = el("div", "list__main");
+      var parts = mainSide();
+      parts.item.setAttribute("data-testid", "activity-item-" + id);
+      parts.item.setAttribute("data-visibility", payment.visibility);
       var parties = el("div", "list__title",
         payment.from_handle + " \u2192 " + payment.to_handle);
       parties.setAttribute("data-testid", "activity-parties-" + id);
+      parts.main.appendChild(parties);
       var note = el("div", "note", payment.note || "");
       note.setAttribute("data-testid", "activity-note-" + id);
-      main.appendChild(parties);
-      main.appendChild(note);
-      main.appendChild(el("div", "list__meta", humanTime(payment.created_at)));
-      var side = el("div", "list__side");
-      side.appendChild(el("span", "pill pill--visibility",
+      parts.main.appendChild(note);
+      parts.main.appendChild(el("div", "list__meta", humanTime(payment.created_at)));
+      parts.side.appendChild(el("span", "pill pill--visibility",
         payment.visibility === "private" ? "Private" : "Public"));
       var amount = el("span", "amount amount--item", formatMinor(payment.amount));
       amount.setAttribute("data-testid", "activity-amount-" + id);
-      side.appendChild(amount);
-      item.appendChild(main);
-      item.appendChild(side);
-      list.appendChild(item);
+      parts.side.appendChild(amount);
+      parts.item.appendChild(parts.main);
+      parts.item.appendChild(parts.side);
+      list.appendChild(parts.item);
     });
     if (payments.length === 0) {
       list.hidden = true;
@@ -243,59 +257,56 @@
     }
   }
 
+  function requestSideControls(request, isIncoming) {
+    var fragment = document.createDocumentFragment();
+    if (request.status === "pending" && isIncoming) {
+      var payBtn = el("button", "btn btn--good btn--small", "Pay");
+      payBtn.type = "button";
+      payBtn.setAttribute("data-testid", "request-pay-" + request.request_id);
+      var declineBtn = el("button", "btn btn--danger btn--small", "Decline");
+      declineBtn.type = "button";
+      declineBtn.setAttribute("data-testid", "request-decline-" + request.request_id);
+      fragment.appendChild(payBtn);
+      fragment.appendChild(declineBtn);
+    }
+    if (request.status === "pending" && !isIncoming) {
+      var cancelBtn = el("button", "btn btn--ghost btn--small", "Cancel");
+      cancelBtn.type = "button";
+      cancelBtn.setAttribute("data-testid", "request-cancel-" + request.request_id);
+      fragment.appendChild(cancelBtn);
+    }
+    return fragment;
+  }
+
   function renderRequests(payload) {
     var incoming = body.querySelector(testid("incoming-list"));
     var outgoing = body.querySelector(testid("outgoing-list"));
     var empty = body.querySelector(testid("empty-requests"));
     if (!incoming || !outgoing) { return; }
-    var me = body.querySelector(testid("current-handle"));
-    var myHandle = me ? me.textContent : "";
+    var handle = myHandle();
     incoming.textContent = "";
     outgoing.textContent = "";
     payload.requests.forEach(function (request) {
       var id = request.request_id;
-      var isIncoming = request.payer_handle === myHandle;
-      var item = el("li", "list__item");
-      item.setAttribute("data-testid", "request-item-" + id);
-      item.setAttribute("data-status", request.status);
-      var main = el("div", "list__main");
-      var title = isIncoming
+      var isIncoming = request.payer_handle === handle;
+      var parts = mainSide();
+      parts.item.setAttribute("data-testid", "request-item-" + id);
+      parts.item.setAttribute("data-status", request.status);
+      parts.main.appendChild(el("div", "list__title", isIncoming
         ? request.requester_handle + " asked you for"
-        : "You asked " + request.payer_handle;
-      main.appendChild(el("div", "list__title", title));
-      if (request.note) { main.appendChild(el("div", "note", request.note)); }
-      main.appendChild(el("div", "list__meta", humanTime(request.created_at)));
-      var side = el("div", "list__side");
-      side.appendChild(el("span", "pill pill--" + request.status, request.status));
+        : "You asked " + request.payer_handle));
+      if (request.note) {
+        parts.main.appendChild(el("div", "note", request.note));
+      }
+      parts.main.appendChild(el("div", "list__meta", humanTime(request.created_at)));
+      parts.side.appendChild(el("span", "pill pill--" + request.status, request.status));
       var amount = el("span", "amount amount--item", formatMinor(request.amount));
       amount.setAttribute("data-testid", "request-amount-" + id);
-      side.appendChild(amount);
-      if (request.status === "pending" && isIncoming) {
-        var payBtn = el("button", "btn btn--good btn--small", "Pay");
-        payBtn.type = "button";
-        payBtn.setAttribute("data-testid", "request-pay-" + id);
-        payBtn.addEventListener("click", function () { answerRequest(id, "pay", payBtn); });
-        var declineBtn = el("button", "btn btn--danger btn--small", "Decline");
-        declineBtn.type = "button";
-        declineBtn.setAttribute("data-testid", "request-decline-" + id);
-        declineBtn.addEventListener("click", function () {
-          answerRequest(id, "decline", declineBtn);
-        });
-        side.appendChild(payBtn);
-        side.appendChild(declineBtn);
-      }
-      if (request.status === "pending" && !isIncoming) {
-        var cancelBtn = el("button", "btn btn--ghost btn--small", "Cancel");
-        cancelBtn.type = "button";
-        cancelBtn.setAttribute("data-testid", "request-cancel-" + id);
-        cancelBtn.addEventListener("click", function () {
-          answerRequest(id, "cancel", cancelBtn);
-        });
-        side.appendChild(cancelBtn);
-      }
-      item.appendChild(main);
-      item.appendChild(side);
-      (isIncoming ? incoming : outgoing).appendChild(item);
+      parts.side.appendChild(amount);
+      parts.side.appendChild(requestSideControls(request, isIncoming));
+      parts.item.appendChild(parts.main);
+      parts.item.appendChild(parts.side);
+      (isIncoming ? incoming : outgoing).appendChild(parts.item);
     });
     var any = payload.requests.length > 0;
     incoming.hidden = !any;
@@ -303,9 +314,125 @@
     if (empty) { empty.hidden = any; }
   }
 
+  function authorizationSideControls(auth, isOutgoing) {
+    var fragment = document.createDocumentFragment();
+    if (auth.status === "open" && !isOutgoing) {
+      var field = el("div", "field");
+      var label = el("label", "field__label", "Capture amount");
+      label.setAttribute("for", "capture-" + auth.authorization_id);
+      var input = el("input");
+      input.type = "text";
+      input.inputMode = "decimal";
+      input.id = "capture-" + auth.authorization_id;
+      input.value = minorToDecimal(auth.remaining_amount);
+      input.setAttribute("data-testid",
+        "authorization-capture-amount-" + auth.authorization_id);
+      label.appendChild(input);
+      field.appendChild(label);
+      var captureBtn = el("button", "btn btn--good btn--small", "Capture");
+      captureBtn.type = "button";
+      captureBtn.setAttribute("data-testid", "authorization-capture-" + auth.authorization_id);
+      field.appendChild(captureBtn);
+      var controls = el("div", "capture-controls");
+      controls.appendChild(field);
+      fragment.appendChild(controls);
+    }
+    if (auth.status === "open" && isOutgoing) {
+      var voidBtn = el("button", "btn btn--ghost btn--small", "Release hold");
+      voidBtn.type = "button";
+      voidBtn.setAttribute("data-testid", "authorization-void-" + auth.authorization_id);
+      fragment.appendChild(voidBtn);
+    }
+    return fragment;
+  }
+
+  function renderAuthorizations(payload) {
+    var list = body.querySelector(testid("authorization-list"));
+    var empty = body.querySelector(testid("empty-authorizations"));
+    if (!list) { return; }
+    var handle = myHandle();
+    list.textContent = "";
+    payload.authorizations.forEach(function (auth) {
+      var id = auth.authorization_id;
+      var isOutgoing = auth.from_handle === handle;
+      var parts = mainSide();
+      parts.item.setAttribute("data-testid", "authorization-item-" + id);
+      parts.item.setAttribute("data-status", auth.status);
+      parts.main.appendChild(el("div", "list__title", isOutgoing
+        ? "You authorized money for " + auth.to_handle
+        : auth.from_handle + " authorized money for you"));
+      if (auth.note) {
+        parts.main.appendChild(el("div", "note", auth.note));
+      }
+      var meta = el("div", "list__meta");
+      meta.appendChild(document.createTextNode("Expires "));
+      var expiry = el("span", "expiry", auth.expires_at);
+      expiry.setAttribute("data-testid", "authorization-expires-" + id);
+      meta.appendChild(expiry);
+      parts.main.appendChild(meta);
+      parts.side.appendChild(el("span", "pill pill--" + auth.status, auth.status));
+      var amount = el("span", "amount amount--item", formatMinor(auth.amount));
+      amount.setAttribute("data-testid", "authorization-amount-" + id);
+      parts.side.appendChild(amount);
+      if (auth.status === "captured") {
+        var captured = el("span", "amount amount--item amount--total",
+          formatMinor(auth.captured_amount) + " captured");
+        captured.setAttribute("data-testid", "authorization-captured-" + id);
+        parts.side.appendChild(captured);
+      }
+      parts.side.appendChild(authorizationSideControls(auth, isOutgoing));
+      parts.item.appendChild(parts.main);
+      parts.item.appendChild(parts.side);
+      list.appendChild(parts.item);
+    });
+    var any = payload.authorizations.length > 0;
+    list.hidden = !any;
+    if (empty) { empty.hidden = any; }
+  }
+
+  function refreshWallet() {
+    var seq = WALLET_SEQ.next();
+    api("/me").then(function (result) {
+      if (WALLET_SEQ.shouldApply(seq) && result.ok) { renderWallet(result.data); }
+    }).catch(function () { /* keep last state */ });
+  }
+
+  function refreshFeed() {
+    var list = body.querySelector(testid("activity-list"));
+    if (!list) { return; }
+    var seq = FEED_SEQ.next();
+    api("/activity").then(function (result) {
+      if (FEED_SEQ.shouldApply(seq) && result.ok) { renderFeed(result.data.payments); }
+    }).catch(function () { /* keep last state */ });
+  }
+
+  function refreshWalletAndFeed() {
+    refreshWallet();
+    refreshFeed();
+  }
+
+  function refreshRequests() {
+    var incoming = body.querySelector(testid("incoming-list"));
+    if (!incoming) { return; }
+    var seq = REQUEST_SEQ.next();
+    api("/requests").then(function (result) {
+      if (REQUEST_SEQ.shouldApply(seq) && result.ok) { renderRequests(result.data); }
+    }).catch(function () { /* keep last state */ });
+  }
+
+  function refreshAuthorizationsAndWallet() {
+    var list = body.querySelector(testid("authorization-list"));
+    if (list) {
+      var seq = AUTH_SEQ.next();
+      api("/authorizations").then(function (result) {
+        if (AUTH_SEQ.shouldApply(seq) && result.ok) { renderAuthorizations(result.data); }
+      }).catch(function () { /* keep last state */ });
+    }
+    refreshWallet();
+  }
+
   function answerRequest(id, action, button) {
     var section = body.querySelector('[data-page="requests"]') || body;
-    var errorBox = section;
     var path = "/requests/" + encodeURIComponent(id) + "/" + action;
     var options = { method: "POST", body: {} };
     if (action === "pay") {
@@ -315,12 +442,12 @@
     api(path, options).then(function (result) {
       if (result.ok) {
         clearMsg(section, "request-error");
-        refreshRequests();
       } else {
         showMsg(section, "request-error", "form-msg form-msg--error",
           errorMessage(result.data, "That request could not be completed."));
-        refreshRequests();
       }
+      refreshRequests();
+      if (action === "pay") { refreshWallet(); }
       if (button) { button.disabled = false; }
     }).catch(function () {
       showMsg(section, "request-error", "form-msg form-msg--error",
@@ -329,14 +456,52 @@
     });
   }
 
-  function refreshRequests() {
-    var incoming = body.querySelector(testid("incoming-list"));
-    var outgoing = body.querySelector(testid("outgoing-list"));
-    if (!incoming || !outgoing) { return; }
-    var seq = REQUEST_SEQ.next();
-    api("/requests").then(function (result) {
-      if (REQUEST_SEQ.shouldApply(seq) && result.ok) { renderRequests(result.data); }
-    }).catch(function () { /* keep last state */ });
+  function captureAuthorization(id, amountText, button) {
+    var section = body.querySelector('[data-page="authorizations"]') || body;
+    clearMsg(section, "authorization-error");
+    var minor = parseAmountToMinor(amountText);
+    if (minor === null) {
+      showMsg(section, "authorization-error", "form-msg form-msg--error",
+        "Please enter a capture amount with at most " + MINOR_UNITS + " decimal places.");
+      return;
+    }
+    if (button) { button.disabled = true; }
+    api("/authorizations/" + encodeURIComponent(id) + "/capture", {
+      method: "POST",
+      body: { amount: minor },
+      key: idemKey("capture-" + id, { authorization_id: id, amount: minor }),
+    }).then(function (result) {
+      if (!result.ok) {
+        showMsg(section, "authorization-error", "form-msg form-msg--error",
+          errorMessage(result.data, "The capture was refused."));
+      }
+      refreshAuthorizationsAndWallet();
+      if (button) { button.disabled = false; }
+    }).catch(function () {
+      showMsg(section, "authorization-error", "form-msg form-msg--error",
+        "We could not reach Pocketful. Please try again.");
+      if (button) { button.disabled = false; }
+    });
+  }
+
+  function voidAuthorization(id, button) {
+    var section = body.querySelector('[data-page="authorizations"]') || body;
+    clearMsg(section, "authorization-error");
+    if (button) { button.disabled = true; }
+    api("/authorizations/" + encodeURIComponent(id) + "/void", {
+      method: "POST", body: {},
+    }).then(function (result) {
+      if (!result.ok) {
+        showMsg(section, "authorization-error", "form-msg form-msg--error",
+          errorMessage(result.data, "The release was refused."));
+      }
+      refreshAuthorizationsAndWallet();
+      if (button) { button.disabled = false; }
+    }).catch(function () {
+      showMsg(section, "authorization-error", "form-msg form-msg--error",
+        "We could not reach Pocketful. Please try again.");
+      if (button) { button.disabled = false; }
+    });
   }
 
   function wireLogoutButtons() {
@@ -380,36 +545,17 @@
     });
   }
 
-  function wireWalletPage() {
+  function wirePayForm() {
     var payForm = document.getElementById("pay-form");
     if (!payForm) { return; }
-    var errorBox = payForm;
-    var uncertainBox = payForm;
-
-    function refreshWalletAndFeed() {
-      var seqMe = WALLET_SEQ.next();
-      api("/me").then(function (result) {
-        if (WALLET_SEQ.shouldApply(seqMe) && result.ok) { renderWallet(result.data); }
-      }).catch(function () { /* keep last state */ });
-      var seqFeed = FEED_SEQ.next();
-      api("/activity").then(function (result) {
-        if (FEED_SEQ.shouldApply(seqFeed) && result.ok) { renderFeed(result.data.payments); }
-      }).catch(function () { /* keep last state */ });
-    }
-
-    var refreshBtn = body.querySelector(testid("wallet-refresh"));
-    if (refreshBtn) {
-      refreshBtn.addEventListener("click", refreshWalletAndFeed);
-    }
-
     payForm.addEventListener("submit", function (event) {
       event.preventDefault();
+      clearMsg(payForm, "pay-error");
+      clearMsg(payForm, "pay-uncertain");
       var handle = document.getElementById("pay-handle").value.trim();
       var amountText = document.getElementById("pay-amount").value;
       var note = document.getElementById("pay-note").value;
       var visibility = document.getElementById("pay-visibility").value;
-      clearMsg(payForm, "pay-error");
-      clearMsg(payForm, "pay-uncertain");
       var minor = parseAmountToMinor(amountText);
       if (!handle || minor === null) {
         showMsg(payForm, "pay-error", "form-msg form-msg--error", minor === null
@@ -417,9 +563,8 @@
           : "Please enter a recipient handle.");
         return;
       }
-      var fields = { to_handle: handle, amount: minor, note: note, visibility: visibility };
-      var key = idemKey("pay", fields);
       var payload = { to_handle: handle, amount: minor, note: note, visibility: visibility };
+      var key = idemKey("pay", payload);
       api("/payments", { method: "POST", body: payload, key: key,
         timeoutMs: PAY_TIMEOUT_MS }).then(function (result) {
         clearPendingPay();
@@ -448,8 +593,15 @@
           "to check its status — you will not be charged twice.");
       }
     });
+  }
 
+  function clearPendingPay() {
+    try { window.localStorage.removeItem(PENDING_PAY_KEY); } catch (err) { /* ignore */ }
+  }
+
+  function wireRequestForm() {
     var requestForm = document.getElementById("request-form");
+    if (!requestForm) { return; }
     requestForm.addEventListener("submit", function (event) {
       event.preventDefault();
       clearMsg(requestForm, "request-error");
@@ -462,9 +614,9 @@
           : "Please enter who the request is for.");
         return;
       }
-      var body_ = { payer_handle: handle, amount: minor, note: note };
-      var key = idemKey("request", { payer_handle: handle, amount: minor, note: note });
-      api("/requests", { method: "POST", body: body_, key: key }).then(function (result) {
+      var payload = { payer_handle: handle, amount: minor, note: note };
+      var key = idemKey("request", payload);
+      api("/requests", { method: "POST", body: payload, key: key }).then(function (result) {
         if (result.ok) {
           refreshWalletAndFeed();
         } else {
@@ -476,169 +628,44 @@
           "We could not reach Pocketful. Please try again.");
       });
     });
-
-    api("/me").then(function (result) {
-      if (result.ok) { renderWallet(result.data); }
-    }).catch(function () { /* ignore */ });
-    api("/activity").then(function (result) {
-      if (result.ok) { renderFeed(result.data.payments); }
-    }).catch(function () { /* ignore */ });
-  }
-
-  function clearPendingPay() {
-    try { window.localStorage.removeItem(PENDING_PAY_KEY); } catch (err) { /* ignore */ }
   }
 
   function wireRequestsPage() {
     var incoming = body.querySelector(testid("incoming-list"));
     if (!incoming) { return; }
-    refreshRequests();
-  }
-
-  function renderAuthorizations(payload) {
-    var list = body.querySelector(testid("authorization-list"));
-    var empty = body.querySelector(testid("empty-authorizations"));
-    if (!list) { return; }
-    var me = body.querySelector(testid("current-handle"));
-    var myHandle = me ? me.textContent : "";
-    list.textContent = "";
-    payload.authorizations.forEach(function (auth) {
-      var id = auth.authorization_id;
-      var isOutgoing = auth.from_handle === myHandle;
-      var item = el("li", "list__item");
-      item.setAttribute("data-testid", "authorization-item-" + id);
-      item.setAttribute("data-status", auth.status);
-      var main = el("div", "list__main");
-      var title = isOutgoing
-        ? "You authorized money for " + auth.to_handle
-        : auth.from_handle + " authorized money for you";
-      main.appendChild(el("div", "list__title", title));
-      if (auth.note) { main.appendChild(el("div", "note", auth.note)); }
-      var meta = el("div", "list__meta");
-      meta.appendChild(document.createTextNode("Expires "));
-      var expiry = el("span", "expiry", auth.expires_at);
-      expiry.setAttribute("data-testid", "authorization-expires-" + id);
-      meta.appendChild(expiry);
-      main.appendChild(meta);
-      var side = el("div", "list__side");
-      side.appendChild(el("span", "pill pill--" + auth.status, auth.status));
-      var amount = el("span", "amount amount--item", formatMinor(auth.amount));
-      amount.setAttribute("data-testid", "authorization-amount-" + id);
-      side.appendChild(amount);
-      if (auth.status === "captured") {
-        var captured = el("span", "amount amount--item amount--total",
-          formatMinor(auth.captured_amount) + " captured");
-        captured.setAttribute("data-testid", "authorization-captured-" + id);
-        side.appendChild(captured);
-      }
-      if (auth.status === "open" && !isOutgoing) {
-        var controls = el("div", "capture-controls");
-        var field = el("div", "field");
-        var label = el("label", "field__label", "Capture amount");
-        label.setAttribute("for", "capture-" + id);
-        var input = el("input");
-        input.type = "text";
-        input.inputMode = "decimal";
-        input.id = "capture-" + id;
-        input.value = minorToDecimal(auth.remaining_amount);
-        input.setAttribute("data-testid", "authorization-capture-amount-" + id);
-        label.appendChild(input);
-        field.appendChild(label);
-        var captureBtn = el("button", "btn btn--good btn--small", "Capture");
-        captureBtn.type = "button";
-        captureBtn.setAttribute("data-testid", "authorization-capture-" + id);
-        captureBtn.addEventListener("click", function () {
-          captureAuthorization(id, input.value, captureBtn);
-        });
-        field.appendChild(captureBtn);
-        controls.appendChild(field);
-        side.appendChild(controls);
-      }
-      if (auth.status === "open" && isOutgoing) {
-        var voidBtn = el("button", "btn btn--ghost btn--small", "Release hold");
-        voidBtn.type = "button";
-        voidBtn.setAttribute("data-testid", "authorization-void-" + id);
-        voidBtn.addEventListener("click", function () {
-          voidAuthorization(id, voidBtn);
-        });
-        side.appendChild(voidBtn);
-      }
-      item.appendChild(main);
-      item.appendChild(side);
-      list.appendChild(item);
-    });
-    var any = payload.authorizations.length > 0;
-    list.hidden = !any;
-    if (empty) { empty.hidden = any; }
-  }
-
-  function refreshAuthorizationsAndWallet() {
-    var seqList = AUTH_SEQ.next();
-    api("/authorizations").then(function (result) {
-      if (AUTH_SEQ.shouldApply(seqList) && result.ok) { renderAuthorizations(result.data); }
-    }).catch(function () { /* keep last state */ });
-    var seqMe = WALLET_SEQ.next();
-    api("/me").then(function (result) {
-      if (WALLET_SEQ.shouldApply(seqMe) && result.ok) { renderWallet(result.data); }
-    }).catch(function () { /* ignore */ });
-  }
-
-  function captureAuthorization(id, amountText, button) {
-    var section = body.querySelector('[data-page="authorizations"]') || body;
-    clearMsg(section, "authorization-error");
-    var minor = parseAmountToMinor(amountText);
-    if (minor === null) {
-      showMsg(section, "authorization-error", "form-msg form-msg--error",
-        "Please enter a capture amount with at most " + MINOR_UNITS + " decimal places.");
-      return;
-    }
-    if (button) { button.disabled = true; }
-    api("/authorizations/" + encodeURIComponent(id) + "/capture", {
-      method: "POST",
-      body: { amount: minor },
-      key: idemKey("capture-" + id, { authorization_id: id, amount: minor }),
-    }).then(function (result) {
-      if (result.ok) {
-        refreshAuthorizationsAndWallet();
-      } else {
-        showMsg(section, "authorization-error", "form-msg form-msg--error",
-          errorMessage(result.data, "The capture was refused."));
-        refreshAuthorizationsAndWallet();
-      }
-      if (button) { button.disabled = false; }
-    }).catch(function () {
-      showMsg(section, "authorization-error", "form-msg form-msg--error",
-        "We could not reach Pocketful. Please try again.");
-      if (button) { button.disabled = false; }
-    });
-  }
-
-  function voidAuthorization(id, button) {
-    var section = body.querySelector('[data-page="authorizations"]') || body;
-    clearMsg(section, "authorization-error");
-    if (button) { button.disabled = true; }
-    api("/authorizations/" + encodeURIComponent(id) + "/void", {
-      method: "POST", body: {},
-    }).then(function (result) {
-      if (result.ok) {
-        refreshAuthorizationsAndWallet();
-      } else {
-        showMsg(section, "authorization-error", "form-msg form-msg--error",
-          errorMessage(result.data, "The release was refused."));
-        refreshAuthorizationsAndWallet();
-      }
-      if (button) { button.disabled = false; }
-    }).catch(function () {
-      showMsg(section, "authorization-error", "form-msg form-msg--error",
-        "We could not reach Pocketful. Please try again.");
-      if (button) { button.disabled = false; }
+    var section = incoming.closest('[data-page="requests"]') || body;
+    section.addEventListener("click", function (event) {
+      var button = event.target.closest("button");
+      if (!button) { return; }
+      var testidAttr = button.getAttribute("data-testid") || "";
+      var match = /^(request-(?:pay|decline|cancel)-(.+))$/.exec(testidAttr);
+      if (!match) { return; }
+      var action = match[1].indexOf("request-pay-") === 0 ? "pay"
+        : match[1].indexOf("request-decline-") === 0 ? "decline" : "cancel";
+      answerRequest(match[2], action, button);
     });
   }
 
   function wireAuthorizationsPage() {
     var form = document.getElementById("authorize-form");
-    if (!form) { return; }
+    var list = body.querySelector(testid("authorization-list"));
     var authorizeNonce = 0;
+    if (list) {
+      list.addEventListener("click", function (event) {
+        var button = event.target.closest("button");
+        if (!button) { return; }
+        var testidAttr = button.getAttribute("data-testid") || "";
+        var captureMatch = /^authorization-capture-(.+)$/.exec(testidAttr);
+        var voidMatch = /^authorization-void-(.+)$/.exec(testidAttr);
+        if (captureMatch) {
+          var input = document.getElementById("capture-" + captureMatch[1]);
+          captureAuthorization(captureMatch[1], input ? input.value : "", button);
+        } else if (voidMatch) {
+          voidAuthorization(voidMatch[1], button);
+        }
+      });
+    }
+    if (!form) { return; }
     form.addEventListener("submit", function (event) {
       event.preventDefault();
       clearMsg(form, "authorize-error");
@@ -654,8 +681,10 @@
       }
       authorizeNonce += 1;
       var payload = { to_handle: handle, amount: minor, note: note, visibility: visibility };
-      var key = idemKey("authz", { to_handle: handle, amount: minor, note: note,
-        visibility: visibility, n: authorizeNonce });
+      var key = idemKey("authz", {
+        to_handle: handle, amount: minor, note: note, visibility: visibility,
+        n: authorizeNonce,
+      });
       api("/authorizations", { method: "POST", body: payload, key: key })
         .then(function (result) {
           if (result.ok) {
@@ -669,7 +698,6 @@
             "We could not reach Pocketful. Please try again.");
         });
     });
-    refreshAuthorizationsAndWallet();
   }
 
   function wireSplitPage() {
@@ -677,7 +705,6 @@
     if (!form) { return; }
     var previewSlot = body.querySelector(testid("split-preview"));
     var previewRows = document.getElementById("split-preview-rows");
-    var splitForm = form;
 
     function parseHandles(text) {
       return String(text || "").split(",").map(function (h) { return h.trim(); })
@@ -703,7 +730,6 @@
         previewRows.appendChild(row);
       });
       previewSlot.hidden = false;
-      previewSlot.setAttribute("data-handles", handles.join(","));
     }
 
     document.getElementById("split-handles").addEventListener("input", refreshPreview);
@@ -711,18 +737,18 @@
 
     form.addEventListener("submit", function (event) {
       event.preventDefault();
-      clearMsg(splitForm, "split-error");
-      clearMsg(splitForm, "split-success");
+      clearMsg(form, "split-error");
+      clearMsg(form, "split-success");
       var handles = parseHandles(document.getElementById("split-handles").value);
       var minor = parseAmountToMinor(document.getElementById("split-amount").value);
       var note = document.getElementById("split-note").value;
       if (handles.length === 0) {
-        showMsg(splitForm, "split-error", "form-msg form-msg--error",
-          "Please enter at least one handle.");
+        showMsg(form, "split-error", "form-msg form-msg--error",
+          "Please enter at least one handle, separated by commas.");
         return;
       }
       if (minor === null) {
-        showMsg(splitForm, "split-error", "form-msg form-msg--error",
+        showMsg(form, "split-error", "form-msg form-msg--error",
           "Please enter an amount with at most " + MINOR_UNITS + " decimal places.");
         return;
       }
@@ -736,33 +762,38 @@
       }).then(function (result) {
         if (result.ok) {
           var created = result.data && result.data.requests ? result.data.requests.length : 0;
-          showMsg(splitForm, "split-success", "form-msg form-msg--success", created > 0
+          showMsg(form, "split-success", "form-msg form-msg--success", created > 0
             ? "Split created — " + created + " payment " +
               (created === 1 ? "request" : "requests") + " sent."
             : "Split created.");
         } else {
-          showMsg(splitForm, "split-error", "form-msg form-msg--error",
+          showMsg(form, "split-error", "form-msg form-msg--error",
             errorMessage(result.data, "The split was refused."));
         }
       }).catch(function () {
-        showMsg(splitForm, "split-error", "form-msg form-msg--error",
+        showMsg(form, "split-error", "form-msg form-msg--error",
           "We could not reach Pocketful. Please try again.");
       });
     });
   }
 
-  var WALLET_SEQ = sequencer();
-  var FEED_SEQ = sequencer();
-  var REQUEST_SEQ = sequencer();
-  var AUTH_SEQ = sequencer();
-
+  function wireRefreshButton() {
+    var refresh = body.querySelector(testid("wallet-refresh"));
+    if (refresh) {
+      refresh.addEventListener("click", function () {
+        refreshWalletAndFeed();
+      });
+    }
+  }
 
   document.addEventListener("DOMContentLoaded", function () {
     wireLogoutButtons();
     wireAuthForm();
-    wireWalletPage();
+    wirePayForm();
+    wireRequestForm();
     wireRequestsPage();
     wireSplitPage();
     wireAuthorizationsPage();
+    wireRefreshButton();
   });
 }());
