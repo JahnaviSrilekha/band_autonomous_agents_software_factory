@@ -4,6 +4,7 @@ import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from .errors import ApiError, error_body, parse_json_body
+from .ui.template import HtmlDocument, StaticFile
 
 MAX_BODY_BYTES = 16 * 1024 * 1024
 
@@ -14,13 +15,15 @@ class _Server(ThreadingHTTPServer):
 
 
 class Route:
-    def __init__(self, method, pattern, handler, auth=False, idem=False, operator=False):
+    def __init__(self, method, pattern, handler, auth=False, idem=False, operator=False,
+                 page=None):
         self.method = method
         self.pattern = re.compile(pattern)
         self.handler = handler
         self.auth = auth
         self.idem = idem
         self.operator = operator
+        self.page = page
 
 
 ROUTES = []
@@ -68,6 +71,7 @@ _add_auth_routes()
 def _add_wallet_routes():
     from .handlers.activity import list_activity
     from .handlers.payments import create_payment
+    from .handlers.requests_page import requests_page
     from .handlers.splits import create_split
     from .handlers.settlements import create_settlement
     from .handlers.requests import (
@@ -79,7 +83,7 @@ def _add_wallet_routes():
     ROUTES.append(Route("POST", r"^/requests/(?P<id>[^/]+)/pay$", pay_request, auth=True, idem=True))
     ROUTES.append(Route("POST", r"^/requests/(?P<id>[^/]+)/decline$", decline_request, auth=True))
     ROUTES.append(Route("POST", r"^/requests/(?P<id>[^/]+)/cancel$", cancel_request, auth=True))
-    ROUTES.append(Route("GET", r"^/requests$", list_requests, auth=True))
+    ROUTES.append(Route("GET", r"^/requests$", list_requests, auth=True, page=requests_page))
     ROUTES.append(Route("GET", r"^/activity$", list_activity, auth=True))
     ROUTES.append(Route("POST", r"^/splits$", create_split, auth=True, idem=True))
     ROUTES.append(Route("POST", r"^/settlements$", create_settlement, auth=True, idem=True, operator=True))
@@ -93,9 +97,11 @@ def _add_authorization_routes():
         capture_authorization, create_authorization, list_authorizations,
         void_authorization,
     )
+    from .handlers.authorizations_page import authorizations_page
 
     ROUTES.append(Route("POST", r"^/authorizations$", create_authorization, auth=True, idem=True))
-    ROUTES.append(Route("GET", r"^/authorizations$", list_authorizations, auth=True))
+    ROUTES.append(Route("GET", r"^/authorizations$", list_authorizations, auth=True,
+                        page=authorizations_page))
     ROUTES.append(Route("POST", r"^/authorizations/(?P<id>[^/]+)/capture$", capture_authorization,
                         auth=True, idem=True))
     ROUTES.append(Route("POST", r"^/authorizations/(?P<id>[^/]+)/void$", void_authorization,
@@ -103,6 +109,28 @@ def _add_authorization_routes():
 
 
 _add_authorization_routes()
+
+
+def _static_page(headers, params):
+    from .handlers.page_common import static_file
+
+    return static_file(params.group(1))
+
+
+def _add_page_routes():
+    from .handlers.auth_pages import login_page, signup_page
+    from .handlers.requests_page import requests_page
+    from .handlers.split_page import split_page
+    from .handlers.wallet_page import wallet_page
+
+    ROUTES.append(Route("GET", r"^/$", None, page=wallet_page))
+    ROUTES.append(Route("GET", r"^/signup$", None, page=signup_page))
+    ROUTES.append(Route("GET", r"^/login$", None, page=login_page))
+    ROUTES.append(Route("GET", r"^/split$", None, page=split_page))
+    ROUTES.append(Route("GET", r"^/static/(app\.js|styles\.css)$", None, page=_static_page))
+
+
+_add_page_routes()
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -120,13 +148,27 @@ class Handler(BaseHTTPRequestHandler):
         self._dispatch("POST")
 
     def _send(self, status, payload):
-        body = b""
-        if payload is not None:
-            body = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        content_type = None
+        raw = None
+        if isinstance(payload, HtmlDocument):
+            content_type = "text/html; charset=utf-8"
+            body = payload.html_text.encode("utf-8")
+            status = payload.status
+        elif isinstance(payload, StaticFile):
+            content_type = payload.content_type
+            body = payload.data
+        else:
+            body = b""
+            if payload is not None:
+                body = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+                content_type = "application/json; charset=utf-8"
+        import sys as _sys, threading as _th
+        print(f"SRVSEND t={_th.current_thread().name} status={status} ct={content_type} len={len(body)}",
+              file=_sys.stderr, flush=True)
         try:
             self.send_response(status)
-            if payload is not None:
-                self.send_header("Content-Type", "application/json; charset=utf-8")
+            if content_type is not None:
+                self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             if body:
@@ -150,6 +192,8 @@ class Handler(BaseHTTPRequestHandler):
         return data
 
     def _dispatch(self, method):
+        import sys as _sys
+        print(f"SRV {method} {self.path}", file=_sys.stderr, flush=True)
         try:
             status, payload = self._handle(method)
         except ApiError as exc:
@@ -174,6 +218,9 @@ class Handler(BaseHTTPRequestHandler):
                 break
         if route is None:
             raise ApiError(404, "not_found", "no such resource")
+        if route.page is not None and (route.handler is None or "text/html" in self.headers.get("Accept", "")):
+            document = route.page(self.headers, match)
+            return document.status, document
         body = None
         if method == "POST":
             body = parse_json_body(self._read_body())
