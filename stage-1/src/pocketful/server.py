@@ -66,6 +66,7 @@ def _add_wallet_routes():
     from .handlers.activity import list_activity
     from .handlers.payments import create_payment
     from .handlers.splits import create_split
+    from .handlers.settlements import create_settlement
     from .handlers.requests import (
         cancel_request, create_request, decline_request, list_requests, pay_request,
     )
@@ -78,6 +79,7 @@ def _add_wallet_routes():
     ROUTES.append(Route("GET", r"^/requests$", list_requests, auth=True))
     ROUTES.append(Route("GET", r"^/activity$", list_activity, auth=True))
     ROUTES.append(Route("POST", r"^/splits$", create_split, auth=True, idem=True))
+    ROUTES.append(Route("POST", r"^/settlements$", create_settlement, auth=True, idem=True, operator=True))
 
 
 _add_wallet_routes()
