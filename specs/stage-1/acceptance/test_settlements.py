@@ -41,7 +41,7 @@ def test_settlement_happy_shape(c):
     eq(get_me(c, toks["bob"])["balance"], 50000 + 100 - 50, "net credits applied")
     eq(get_me(c, toks["cy"])["balance"], 50, "receiver credited")
     # Ordinary payments expose settlement_id null (R56/R91).
-    p = expect_ok(make_pay(c, toks["ada"], "bob", 10), 201).json()
+    p = expect_ok(make_pay(c, toks["ada"], "bob", 10), 201)
     check(p["settlement_id"] is None, "nonmember exposes null settlement_id (R91)")
 
 
@@ -56,8 +56,7 @@ def test_operator_permissions(c):
                         body={"transfers": [t("ada", "bob", 10)]},
                         headers={"Idempotency-Key": "st-noauth"}), 401,
                  "unauthenticated")
-    expect_error(settle(c, toks["ada"], [t("ada", "bob", 10)], "st-2"), 403,
-                 "non-operator forbidden (R88)")
+    expect_error(settle(c, toks["ada"], [t("ada", "bob", 10)], "st-2"), 403, "forbidden", "non-operator (R88)")
     # Operator permission does not grant access to others' requests/private feed.
     rq = expect_ok(c.post("/requests", body={"payer_handle": "bob", "amount": 10},
                           token=toks["ada"], headers={"Idempotency-Key": "perm-1"}),
@@ -79,9 +78,10 @@ def test_operator_permissions(c):
 def test_transfers_bounds_and_shape(c):
     toks = fresh(c, operator=True)
     op = toks["op"]
-    expect_error(settle(c, op, [], "b-1"), 422, "zero transfers (R87)")
+    expect_error(settle(c, op, [], "b-1"), 422, "validation_failed",
+                 "zero transfers (R87)")
     expect_error(settle(c, op, [t("ada", "bob", 1)] * 33, "b-2"), 422,
-                 "33 transfers rejected (R87)")
+                 "validation_failed", "33 transfers rejected (R87)")
     r = settle(c, op, [t("ada", "bob", 1)] * 32, "b-3")
     eq(r.status, 201, "32 transfers accepted (R87 boundary)")
     # A9: wrong-typed batch shape is 422, not 400.
@@ -92,23 +92,27 @@ def test_transfers_bounds_and_shape(c):
                              '{"transfers":[{"from_handle":"ada","amount":1}]}')):
         r = c.post("/settlements", raw_body=raw, token=op,
                    headers={"Idempotency-Key": f"shape-{i}"})
-        expect_error(r, 422, f"malformed batch shape {raw} (A9/R88)")
+        expect_error(r, 422, "validation_failed", f"malformed batch shape {raw} (A9/R88)")
     r = c.post("/settlements", body={"amount": 10}, token=op,
                headers={"Idempotency-Key": "shape-missing"})
-    expect_error(r, 422, "missing transfers (R88)")
+    expect_error(r, 422, "validation_failed", "missing transfers (R88)")
 
 
 def test_entry_rules_and_defaults(c):
     toks = fresh(c, operator=True)
     op = toks["op"]
-    expect_error(settle(c, op, [t("ada", "nobody", 10)], "e-1"), 404, "unknown handle")
+    expect_error(settle(c, op, [t("ada", "nobody", 10)], "e-1"), 404,
+                 "not_found", "unknown handle")
     expect_error(settle(c, op, [t("ada", "ada", 10)], "e-2"), 422, "self_payment")
-    expect_error(settle(c, op, [t("ada", "bob", 0)], "e-3"), 422, "amount 0")
+    expect_error(settle(c, op, [t("ada", "bob", 0)], "e-3"), 422,
+                 "validation_failed", "amount 0")
     expect_error(settle(c, op, [t("ada", "bob", 10, note="n" * 201)], "e-3"), 422,
-                 "long note")
+                 "validation_failed", "long note")
     expect_error(settle(c, op, [t("ada", "bob", 10, visibility="secret")], "e-4"), 422,
-                 "bad visibility")
-    r = expect_ok(settle(c, op, [t("ada", "bob", 10, extra={"zzz": 1})], "e-5"), 201)
+                 "validation_failed", "bad visibility")
+    r = expect_ok(c.post("/settlements",
+                         body={"transfers": [dict(t("ada", "bob", 10), zzz=1)]},
+                         token=op, headers={"Idempotency-Key": "e-5"}), 201)
     check(r["payments"][0]["note"] == "", "unknown entry fields ignored (R88)")
 
 
@@ -118,16 +122,17 @@ def test_entry_errors_precede_affordability_in_input_order(c):
     # Entry 1 is affordable; entry 2 has an unknown handle: 404 wins over any
     # batch-level insufficiency (R88).
     expect_error(settle(c, op, [t("ada", "bob", 100), t("nobody", "cy", 10)], "pre-1"),
-                 404, "entry error in input order before affordability")
+                 404, "not_found", "entry error before affordability")
     # First entry's error wins when multiple entries are invalid.
     expect_error(settle(c, op, [t("ada", "ada", 10), t("nobody", "cy", 10)], "pre-2"),
-                 422, "self_payment reported for entry 1")
+                 422, "self_payment", "reported for entry 1")
     expect_error(settle(c, op, [t("nobody", "cy", 10), t("ada", "ada", 10)], "pre-3"),
-                 404, "unknown handle reported for entry 1")
+                 404, "not_found", "unknown handle reported for entry 1")
     # Entry errors beat batch insufficiency: entry 1 fine, entry 2 unknown
     # handle, batch also collectively unaffordable.
     expect_error(settle(c, op, [t("ada", "bob", 1000000000), t("nobody", "cy", 5)],
-                        "pre-4"), 404, "entry error precedes insufficient funds (R88)")
+                        "pre-4"), 404, "not_found",
+                 "entry error precedes insufficient funds (R88)")
 
 
 def test_net_affordability_not_sequential(c):
@@ -208,4 +213,4 @@ def test_settlement_operator_id_in_fixture_default(c):
     toks = fresh(c)
     r = c.post("/settlements", body={"transfers": [t("ada", "bob", 10)]},
                token=toks["ada"], headers={"Idempotency-Key": "dflt-1"})
-    expect_error(r, 403, "forbidden without operator permission")
+    expect_error(r, 403, "forbidden", "no operator permission by default (R86)")

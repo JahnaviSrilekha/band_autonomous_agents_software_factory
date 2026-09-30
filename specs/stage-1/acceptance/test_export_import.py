@@ -44,7 +44,7 @@ def test_import_replacement_not_merge(c):
                              "handle": "z", "balance": 5}])
     r = c.import_state(snapshot)
     eq(r.status, 204, "import 204")
-    expect_error(c.get("/me", token=other["z"]), 401,
+    expect_error(c.get("/me", token=other["z"]), 401, "unauthenticated",
                  "destination credentials removed (R83)")
     eq(get_me(c, toks["ada"])["balance"], 100000,
        "imported state restored exactly (R79)")
@@ -67,9 +67,9 @@ def test_import_errors_leave_destination_unchanged(c):
         {"track": "pocketful", "format_version": 1, "state": None},
     ]):
         r = c.import_state(bad)
-        expect_error(r, 422, f"bad import payload {i} (R80)")
+        expect_error(r, 422, "validation_failed", f"bad import payload {i} (R80)")
     r = c.request("POST", "/_test/import", raw_body="{broken", timeout=10)
-    expect_error(r, 400, "invalid JSON is 400 (R80)")
+    expect_error(r, 400, "malformed_request", "invalid JSON (R80)")
     # Destination unchanged.
     eq(get_me(c, toks["ada"])["balance"], 100000, "state unchanged (R80)")
     eq(c.import_state(snapshot).status, 204, "valid import still accepted")
@@ -157,7 +157,7 @@ def test_reset_clears_imported_state(c):
                      "handle": "z", "balance": 5}])
     eq(c.import_state(snapshot).status, 204, "import 204")
     fresh(c)  # reset with the standard fixture
-    expect_error(c.get("/me", token=toks["ada"]), 401,
+    expect_error(c.get("/me", token=toks["ada"]), 401, "unauthenticated",
                  "imported credentials cleared by reset (R84)")
     new_ada = c.token_for("ada")
     eq(get_me(c, new_ada)["balance"], 100000, "reset state is the fresh fixture (R84)")

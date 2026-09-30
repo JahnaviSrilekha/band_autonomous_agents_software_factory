@@ -56,26 +56,27 @@ def test_amount_bounds_and_types(c):
     rich = c.token_for("rich")
     for key, amount in [("amt-neg", -5), ("amt-0", 0), ("amt-over", 1000000001)]:
         expect_error(make_payment(c, rich, "ada", amount, key), 422,
-                     f"amount {amount} rejected (R57/R30)")
-    eq(make_payment(c, rich, "ada", 1, "amt-1").status, 201, "amount 1 accepted")
+                     "validation_failed", f"amount {amount} rejected (R57/R30)")
     eq(make_payment(c, rich, "ada", 1000000000, "amt-max").status, 201,
        "amount 1000000000 accepted (R30 boundary)")
+    eq(make_payment(c, c.token_for("ada"), "rich", 1, "amt-1").status, 201,
+       "amount 1 accepted (R57 boundary)")
     for i, raw in enumerate(('{"to_handle":"ada","amount":"100"}',
                              '{"to_handle":"ada","amount":true}',
                              '{"to_handle":"ada","amount":false}',
                              '{"to_handle":"ada","amount":1.5}')):
         r = c.post("/payments", raw_body=raw, token=rich,
                    headers={"Idempotency-Key": f"amt-type-{i}"})
-        expect_error(r, 422, f"non-integer amount {raw} (R38)")
+        expect_error(r, 422, "validation_failed", f"non-integer amount {raw} (R38)")
     r = c.post("/payments", body={"to_handle": "ada"}, token=rich,
                headers={"Idempotency-Key": "amt-missing"})
-    expect_error(r, 422, "missing amount (R36)")
+    expect_error(r, 422, "validation_failed", "missing amount (R36)")
     r = c.post("/payments", raw_body='{"to_handle":5,"amount":1}', token=rich,
                headers={"Idempotency-Key": "th-type"})
-    expect_error(r, 400, "non-string to_handle (R40)")
+    expect_error(r, 400, "malformed_request", "non-string to_handle (R40)")
     r = c.post("/payments", body={"amount": 1}, token=rich,
                headers={"Idempotency-Key": "th-missing"})
-    expect_error(r, 422, "missing to_handle (R36)")
+    expect_error(r, 422, "validation_failed", "missing to_handle (R36)")
 
 
 def test_self_payment_and_unknown_handle(c):
@@ -85,7 +86,7 @@ def test_self_payment_and_unknown_handle(c):
     expect_error(make_payment(c, toks["ada"], "nobody", 100, "unk-1"),
                  404, "not_found")
     expect_error(make_payment(c, toks["ada"], "ADA", 100, "unk-2"),
-                 404, "handles are lowercase; 'ADA' unknown (R19)")
+                 404, "not_found", "handles are lowercase; 'ADA' unknown (R19)")
 
 
 def test_note_and_visibility_rules(c):
@@ -95,18 +96,24 @@ def test_note_and_visibility_rules(c):
     eq(r.status, 201, "200-char note accepted (boundary)")
     eq(r.json()["note"], ok_note, "note round trip")
     expect_error(make_payment(c, toks["ada"], "bob", 10, "note-2", note="n" * 201),
-                 422, "201-char note rejected (R57)")
+                 422, "validation_failed", "201-char note rejected (R57)")
     for i, raw in enumerate(('{"to_handle":"bob","amount":10,"note":5}',
                              '{"to_handle":"bob","amount":10,"note":null}',
                              '{"to_handle":"bob","amount":10,"note":["x"]}')):
         r = c.post("/payments", raw_body=raw, token=toks["ada"],
                    headers={"Idempotency-Key": f"note-t-{i}"})
-        expect_error(r, 422, f"non-string note {raw} (R38)")
+        expect_error(r, 422, "validation_failed", f"non-string note {raw} (R38)")
     eq(make_payment(c, toks["ada"], "bob", 10, "vis-1", visibility="private").status,
        201, "private visibility accepted")
-    for i, bad in enumerate(("internal", "", "Public", 5, None, True)):
+    # Explicit null visibility is a present, non-default value: 422 (R38 —
+    # omission alone selects the default).
+    r = c.post("/payments", raw_body='{"to_handle":"bob","amount":10,"visibility":null}',
+               token=toks["ada"], headers={"Idempotency-Key": "vis-null"})
+    expect_error(r, 422, "validation_failed", "explicit null visibility (R38)")
+    for i, bad in enumerate(("internal", "", "Public", 5, True)):
         r = make_payment(c, toks["ada"], "bob", 10, f"vis-bad-{i}", visibility=bad)
-        expect_error(r, 422, f"visibility {bad!r} rejected (R57/R38)")
+        expect_error(r, 422, "validation_failed",
+                     f"visibility {bad!r} rejected (R57/R38)")
 
 
 def test_note_verbatim_unicode(c):

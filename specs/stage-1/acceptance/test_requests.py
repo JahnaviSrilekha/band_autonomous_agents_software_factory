@@ -1,5 +1,5 @@
 """Money requests: create/pay/decline/cancel/list (R23-R25, R60-R70, A6)."""
-from client import (check, eq, expect_error, expect_ok, fresh, get_me,
+from client import (check, eq, expect_error, expect_ok, fresh, fuser, get_me,
                     make_payment, payment_body)
 
 
@@ -46,17 +46,17 @@ def test_request_error_table(c):
     expect_error(create_request(c, toks["bob"], "ada", 1000000001, "amt-2"), 422,
                  "validation_failed")
     expect_error(create_request(c, toks["bob"], "ada", "100", "amt-3"), 422,
-                 "string amount 422 (R38)")
+                 "validation_failed", "string amount (R38)")
     expect_error(create_request(c, toks["bob"], "nobody", 100, "unk-1"), 404,
                  "not_found")
     expect_error(create_request(c, toks["bob"], "ada", 100, "note-1",
                                 note="n" * 201), 422, "validation_failed")
     r = c.post("/requests", raw_body='{"payer_handle":5,"amount":1}',
                token=toks["bob"], headers={"Idempotency-Key": "ph-type"})
-    expect_error(r, 400, "non-string payer_handle (R40)")
+    expect_error(r, 400, "malformed_request", "non-string payer_handle (R40)")
     r = c.post("/requests", body={"amount": 1}, token=toks["bob"],
                headers={"Idempotency-Key": "ph-missing"})
-    expect_error(r, 422, "missing payer_handle (R36)")
+    expect_error(r, 422, "validation_failed", "missing payer_handle (R36)")
 
 
 def test_request_creation_ignores_payer_balance(c):
@@ -96,7 +96,7 @@ def test_pay_body_equality_strict(c):
     r = c.post(f"/requests/{rq['request_id']}/pay",
                body={"visibility": "public"}, token=toks["ada"],
                headers={"Idempotency-Key": "be-1-k"})
-    expect_error(r, 409, "idempotency_key_reuse ({} vs visibility default)")
+    expect_error(r, 409, "idempotency_key_reuse", "{} vs visibility default (R63)")
 
 
 def test_pay_error_table(c):
@@ -116,9 +116,11 @@ def test_pay_error_table(c):
     st = [x for x in expect_ok(c.get("/requests", token=toks["ada"]), 200)["requests"]
           if x["request_id"] == rid][0]
     eq(st["status"], "pending", "failed pay leaves request pending (R24)")
-    # Money arrives later; the same request becomes payable (R24). Refund ada
-    # first via a fresh operator fixture.
-    toks = fresh(c, operator=True)
+    # Money arrives later; the same request becomes payable (R24): a rich
+    # operator funds the payer mid-flight.
+    users = [fuser("u_ada", "ada", 100000), fuser("u_bob", "bob", 50000),
+             fuser("u_cy", "cy", 0), fuser("u_op", "op", 1000000000)]
+    toks = fresh(c, users=users, operators=["u_op"])
     rq = expect_ok(create_request(c, toks["bob"], "ada", 1000000000, "pe-7"), 201)
     rid = rq["request_id"]
     expect_error(pay_request(c, toks["ada"], rid, "pe-8"), 409, "insufficient_funds")
@@ -145,7 +147,7 @@ def test_pay_replay_after_paid(c):
     eq(get_me(c, toks["ada"])["balance"], bal, "no additional money moved (R66)")
     # Different key on an already-paid request is not a replay: 409.
     expect_error(pay_request(c, toks["ada"], rq["request_id"], "rp-1-other"), 409,
-                 "request_not_pending (R3)")
+                 "request_not_pending", "R3")
 
 
 def test_decline_lifecycle(c):
@@ -153,9 +155,9 @@ def test_decline_lifecycle(c):
     rq = expect_ok(create_request(c, toks["bob"], "ada", 100, "dec-1"), 201)
     rid = rq["request_id"]
     expect_error(c.post(f"/requests/{rid}/decline", token=toks["bob"]), 403,
-                 "requester is not the payer (R67)")
+                 "forbidden", "requester is not the payer (R67)")
     expect_error(c.post(f"/requests/{rid}/decline", token=toks["cy"]), 403,
-                 "third party forbidden (R67)")
+                 "forbidden", "third party decline (R67)")
     r = expect_ok(c.post(f"/requests/{rid}/decline", token=toks["ada"]), 200)
     eq(r["status"], "declined", "payer declines (R67)")
     r2 = expect_ok(c.post(f"/requests/{rid}/decline", token=toks["ada"]), 200)
@@ -166,7 +168,7 @@ def test_decline_lifecycle(c):
     rq2 = expect_ok(create_request(c, toks["bob"], "ada", 50, "dec-3"), 201)
     expect_ok(pay_request(c, toks["ada"], rq2["request_id"], "dec-4"), 201)
     expect_error(c.post(f"/requests/{rq2['request_id']}/decline", token=toks["ada"]),
-                 409, "request_not_pending (paid)")
+                 409, "request_not_pending", "decline a paid request")
 
 
 def test_cancel_lifecycle(c):
@@ -174,9 +176,9 @@ def test_cancel_lifecycle(c):
     rq = expect_ok(create_request(c, toks["bob"], "ada", 100, "can-1"), 201)
     rid = rq["request_id"]
     expect_error(c.post(f"/requests/{rid}/cancel", token=toks["ada"]), 403,
-                 "payer is not the requester (R68)")
+                 "forbidden", "payer is not the requester (R68)")
     expect_error(c.post(f"/requests/{rid}/cancel", token=toks["cy"]), 403,
-                 "third party forbidden (R68)")
+                 "forbidden", "third party cancel (R68)")
     r = expect_ok(c.post(f"/requests/{rid}/cancel", token=toks["bob"]), 200)
     eq(r["status"], "cancelled", "requester cancels (R68)")
     r2 = expect_ok(c.post(f"/requests/{rid}/cancel", token=toks["bob"]), 200)
@@ -186,7 +188,7 @@ def test_cancel_lifecycle(c):
     rq2 = expect_ok(create_request(c, toks["bob"], "ada", 50, "can-3"), 201)
     expect_ok(c.post(f"/requests/{rq2['request_id']}/decline", token=toks["ada"]), 200)
     expect_error(c.post(f"/requests/{rq2['request_id']}/cancel", token=toks["bob"]),
-                 409, "request_not_pending (declined)")
+                 409, "request_not_pending", "cancel a declined request")
 
 
 def test_supplied_key_on_decline_cancel_ignored(c):
@@ -252,12 +254,13 @@ def test_requests_listing_and_filters(c):
 def test_requests_listing_validation(c):
     toks = fresh(c)
     expect_error(c.get("/requests?direction=bothways", token=toks["bob"]), 422,
-                 "unknown direction (R70)")
+                 "validation_failed", "unknown direction (R70)")
     expect_error(c.get("/requests?status=archived", token=toks["bob"]), 422,
-                 "unknown status (R70)")
-    expect_error(c.get("/requests?limit=0", token=toks["bob"]), 422, "limit 0 (R41)")
+                 "validation_failed", "unknown status (R70)")
+    expect_error(c.get("/requests?limit=0", token=toks["bob"]), 422, "validation_failed",
+                 "limit 0 (R41)")
     expect_error(c.get("/requests?limit=201", token=toks["bob"]), 422,
-                 "limit 201 (R41)")
+                 "validation_failed", "limit 201 (R41)")
     eq(expect_ok(c.get("/requests?limit=200", token=toks["bob"]), 200)["requests"],
        expect_ok(c.get("/requests", token=toks["bob"]), 200)["requests"],
        "limit 200 boundary ok")
@@ -267,7 +270,7 @@ def test_requests_listing_validation(c):
     for q in ("limit=1e9", "limit=4.0", "limit=%2B4", "offset=%2B0",
               "limit=abc", "offset=-1"):
         expect_error(c.get(f"/requests?{q}", token=toks["bob"]), 422,
-                     f"bad query {q} (R39/R41)")
+                     "validation_failed", f"bad query {q} (R39/R41)")
 
 
 def test_request_moves_money_at_most_once(c):

@@ -24,11 +24,12 @@ def test_signup_error_table(c):
     expect_error(r, 409, "handle_taken")
     # Password shorter than 8 characters.
     expect_error(c.signup("p1@example.com", "short"), 422, "validation_failed")
-    expect_ok(c.signup("p1@example.com", "short7x", "P1"), 201,
+    expect_ok(c.signup("p1@example.com", "short7xy", "P1"), 201,
               "8-char password accepted (boundary)")
     # Email not of the form local@domain.
     for bad in ("no-at", "a@b@c", "@example.com", "local@", "local@domain@x"):
-        expect_error(c.signup(bad, PASSWORD, "X"), 422, f"bad email {bad!r} (R44)")
+        expect_error(c.signup(bad, PASSWORD, "X"), 422, "validation_failed",
+                     f"bad email {bad!r} (R44)")
 
 
 def test_email_case_sensitivity_login(c):
@@ -62,7 +63,8 @@ def test_derived_handle_collision(c):
     r = c.signup("Collide@x.com", PASSWORD, "C2")  # derived handle also "collide"
     # Emails differ (A11), so the failure must be handle_taken, not email_taken.
     expect_error(r, 409, "handle_taken")
-    expect_error(c.login("Collide@x.com"), 401, "unauthenticated (no account created)")
+    expect_error(c.login("Collide@x.com"), 401, "unauthenticated",
+                 "no account created on handle collision")
 
 
 def test_new_user_zero_balance_and_receivable(c):
@@ -95,13 +97,14 @@ def test_missing_or_bad_token_401(c):
     paths = [("GET", "/me"), ("GET", "/activity"), ("GET", "/requests"),
              ("POST", "/payments"), ("POST", "/requests")]
     for method, path in paths:
-        expect_error(c.request(method, path), 401, f"unauthenticated: {method} {path}")
+        expect_error(c.request(method, path), 401, "unauthenticated",
+                     f"{method} {path} without token")
     r = c.get("/me", token="totally-unknown-token")
-    expect_error(r, 401, "unknown token")
+    expect_error(r, 401, "unauthenticated", "unknown token")
     r = c.get("/me", headers={"Authorization": "Basic dXNlcjpwdw=="})
-    expect_error(r, 401, "non-bearer auth scheme")
+    expect_error(r, 401, "unauthenticated", "non-bearer auth scheme")
     r = c.get("/me", headers={"Authorization": "Bearer"})
-    expect_error(r, 401, "bare Bearer scheme")
+    expect_error(r, 401, "unauthenticated", "bare Bearer scheme")
     # Wallet API endpoints require auth even with a valid-format but unknown token.
     expect_error(c.post("/payments", body={"to_handle": "bob", "amount": 1},
                         headers={"Idempotency-Key": "noauth-1"}),

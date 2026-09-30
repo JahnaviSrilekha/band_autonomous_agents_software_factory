@@ -22,10 +22,10 @@ def test_missing_and_empty_key_on_every_write_path(c):
                                          "amount": 10}]}, op),
     ]
     for path, body, tok in cases:
-        expect_error(c.post(path, body=body, token=tok),
-                     400, f"missing_idempotency_key (no header): {path}")
+        expect_error(c.post(path, body=body, token=tok), 400,
+                     "missing_idempotency_key", f"no header: {path}")
         expect_error(c.post(path, body=body, token=tok, headers={"Idempotency-Key": ""}),
-                     400, f"missing_idempotency_key (empty header): {path}")
+                     400, "missing_idempotency_key", f"empty header: {path}")
 
 
 def test_first_use_201_replay_200_diff_body_409(c):
@@ -87,14 +87,14 @@ def test_canonical_body_equality(c):
               201, "first use zz=1")
     r = c.post("/payments", raw_body='{"to_handle":"bob","amount":100,"zz":true}',
                token=toks["ada"], headers={"Idempotency-Key": "canon-3"})
-    expect_error(r, 409, "idempotency_key_reuse (true != 1)")
+    expect_error(r, 409, "idempotency_key_reuse", "true != 1")
     expect_ok(c.post("/payments",
                      body={"to_handle": "bob", "amount": 100, "zz": 0},
                      token=toks["ada"], headers={"Idempotency-Key": "canon-4"}),
               201, "first use zz=0")
     r = c.post("/payments", raw_body='{"to_handle":"bob","amount":100,"zz":false}',
                token=toks["ada"], headers={"Idempotency-Key": "canon-4"})
-    expect_error(r, 409, "idempotency_key_reuse (false != 0)")
+    expect_error(r, 409, "idempotency_key_reuse", "false != 0")
 
 
 def test_key_reusable_after_4xx_failure(c):
@@ -123,15 +123,16 @@ def test_claimed_key_resolved_before_field_validation(c):
     # Invalid body (amount 0) with the same key: 409, not 422.
     r = c.post("/payments", body=payment_body("bob", 0), token=toks["ada"],
                headers={"Idempotency-Key": "claim-1"})
-    expect_error(r, 409, "idempotency_key_reuse before validation (R54)")
+    expect_error(r, 409, "idempotency_key_reuse", "before validation (R54)")
     # Unknown-handle body with same key: 409, not 404.
     r = c.post("/payments", body=payment_body("nobody", 100), token=toks["ada"],
                headers={"Idempotency-Key": "claim-1"})
-    expect_error(r, 409, "idempotency_key_reuse before resource checks (R54)")
+    expect_error(r, 409, "idempotency_key_reuse", "before resource checks (R54)")
     # Same key, different path, invalid body: different request -> normal validation.
     r = c.post("/requests", body={"payer_handle": "bob", "amount": 0},
                token=toks["ada"], headers={"Idempotency-Key": "claim-1"})
-    expect_error(r, 422, "validation_failed (different path not a replay, R50)")
+    expect_error(r, 422, "validation_failed",
+                 "different path not a replay (R50)")
 
 
 def test_auth_precedes_key_resolution(c):
@@ -151,9 +152,10 @@ def test_non_object_body_400_before_auth_and_key(c):
     toks = fresh(c)
     for raw in ("[1,2]", '"x"', "5", "null", "true"):
         r = c.post("/payments", raw_body=raw, headers={"Idempotency-Key": "nonobj-1"})
-        expect_error(r, 400, f"non-object body {raw} (A8)")
+        expect_error(r, 400, "malformed_request", f"non-object body {raw} (A8)")
         r = c.post("/payments", raw_body=raw)  # unauthenticated too
-        expect_error(r, 400, f"non-object body {raw} before auth (A8)")
+        expect_error(r, 400, "malformed_request",
+                     f"non-object body {raw} before auth (A8)")
     r = c.post("/payments", body=payment_body("bob", 100), token=toks["ada"],
                headers={"Idempotency-Key": "nonobj-1"})
     eq(r.status, 201, "key still fresh after non-object attempts (A8)")
@@ -165,7 +167,7 @@ def test_key_length_bounds(c):
     r = make_payment(c, toks["ada"], "bob", 100, k255)
     eq(r.status, 201, "255-char key accepted (R41 boundary)")
     r = make_payment(c, toks["ada"], "bob", 100, "k" * 256)
-    expect_error(r, 422, "256-char key rejected (R41)")
+    expect_error(r, 422, "validation_failed", "256-char key rejected (R41)")
 
 
 def test_concurrent_identical_exactly_once(c):
@@ -197,8 +199,11 @@ def test_concurrent_same_key_different_body(c):
     codes = [r.status for r in results]
     eq(codes.count(201), 1, "at most one first-use win")
     check(all(s in (200, 201, 409) for s in codes), f"no other codes: {codes}")
-    total = sum(r.json()["amount"] for r in results if r.status in (200, 201))
-    eq(total, 100, "only the winning body's amount moved (once)")
+    winner = [r.json()["amount"] for r in results if r.status in (200, 201)]
+    eq(len(set(winner)), 1, "all success bodies describe the same winning payment")
+    eq(sum(winner), winner[0], "only the winning body's amount moved (once)")
+    eq(get_me(c, toks["ada"])["balance"], 100000 - winner[0],
+       "exactly the winning amount debited")
 
 
 def test_replay_after_balance_change(c):

@@ -32,7 +32,7 @@ def eq(actual, expected, msg):
     check(actual == expected, f"{msg}: expected {expected!r}, got {actual!r}")
 
 
-def expect_error(resp, status, code):
+def expect_error(resp, status, code, what=""):
     """Assert a 4xx body conforms to R35 and carries the specified code."""
     check(
         status <= 499,
@@ -40,24 +40,25 @@ def expect_error(resp, status, code):
     )
     if resp.status != status:
         raise SuiteFailure(
-            f"expected HTTP {status} {code}, got {resp.status}: {resp.raw[:300]!r}"
+            f"{what}: expected HTTP {status} {code}, got {resp.status}: "
+            f"{resp.raw[:300]!r}"
         )
     check(
         "application/json" in resp.content_type,
-        f"{status} response content-type not JSON: {resp.content_type!r}",
+        f"{what}: {status} response content-type not JSON: {resp.content_type!r}",
     )
     body = resp.json()
-    check(isinstance(body, dict) and "error" in body, f"error body shape: {body!r}")
+    check(isinstance(body, dict) and "error" in body, f"{what}: error body shape: {body!r}")
     check(
         set(body.keys()) == {"error"},
-        f"error body has unexpected top-level keys: {sorted(body.keys())}",
+        f"{what}: error body has unexpected top-level keys: {sorted(body.keys())}",
     )
     err = body["error"]
-    check(isinstance(err, dict), f"error member not an object: {err!r}")
-    eq(err.get("code"), code, "error code")
+    check(isinstance(err, dict), f"{what}: error member not an object: {err!r}")
+    eq(err.get("code"), code, f"{what}: error code")
     check(
         isinstance(err.get("message"), str) and err.get("message"),
-        f"error.message must be a non-empty string: {err!r}",
+        f"{what}: error.message must be a non-empty string: {err!r}",
     )
 
 

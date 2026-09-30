@@ -1,5 +1,5 @@
 """Health, reset/seed, and §3.4 conventions (R13-R16, R31-R34, A5, A13)."""
-from client import (RFC3339, STANDARD_USERS, check, eq, expect_error,
+from client import (PASSWORD, RFC3339, STANDARD_USERS, check, eq, expect_error,
                     expect_ok, fixture, fresh, fuser, get_me, make_payment)
 
 
@@ -57,7 +57,8 @@ def test_reset_minor_units_domain(c):
     fresh(c)
     for mu in (1, 4, -2, 2.5):
         bad = fixture(users=STANDARD_USERS, minor_units=mu)
-        expect_error(c.reset(bad), 422, f"minor_units={mu} must be rejected (R34/A5)")
+        expect_error(c.reset(bad), 422, "validation_failed",
+                     f"minor_units={mu} must be rejected (R34/A5)")
     ok1 = c.reset(fixture(users=[fuser("u_j", "j", 1000)], currency="JPY", minor_units=0))
     eq(ok1.status, 204, "minor_units=0 accepted")
     eq(get_me(c, c.token_for("j"))["minor_units"], 0, "minor_units echoed (R17)")
@@ -70,10 +71,10 @@ def test_reset_currency_validation(c):
     fresh(c)
     missing = fixture(users=STANDARD_USERS)
     del missing["currency"]
-    expect_error(c.reset(missing), 422, "missing currency (A13)")
+    expect_error(c.reset(missing), 422, "validation_failed", "missing currency (A13)")
     for bad_cur in (5, None, "", True):
         expect_error(c.reset(fixture(users=STANDARD_USERS, currency=bad_cur)),
-                     422, f"currency={bad_cur!r} (A13)")
+                     422, "validation_failed", f"currency={bad_cur!r} (A13)")
     # State unchanged after rejected resets.
     toks = fresh(c)
     eq(get_me(c, toks["ada"])["balance"], 100000, "state unchanged (A13)")
@@ -100,7 +101,8 @@ def test_seeded_users_login_and_balances_verbatim(c):
     # Seeded payment appears in both parties' feeds (R26).
     for tok in (ada, bob):
         pays = expect_ok(c.get("/activity", token=tok), 200)["payments"]
-        eq([p["id"] for p in pays], ["p_1"], f"seeded payment visible to {tok[:6]}")
+        eq([p["payment_id"] for p in pays], ["p_1"],
+           f"seeded payment visible to {tok[:6]}")
     # Seeded request visible to its two parties only via /requests (R27).
     eq(len(expect_ok(c.get("/requests", token=ada), 200)["requests"]), 1, "ada sees rq_1")
     eq(len(expect_ok(c.get("/requests", token=bob), 200)["requests"]), 1, "bob sees rq_1")

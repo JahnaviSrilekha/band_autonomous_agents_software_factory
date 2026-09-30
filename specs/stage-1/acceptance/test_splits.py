@@ -95,22 +95,24 @@ def test_zero_share_still_creates_request(c):
 
 def test_split_error_table(c):
     toks = fresh(c)
-    expect_error(split(c, toks["ada"], 0, ["bob"], "spe-1"), 422, "amount 0 (R73)")
+    expect_error(split(c, toks["ada"], 0, ["bob"], "spe-1"), 422,
+                 "validation_failed", "amount 0 (R73)")
     expect_error(split(c, toks["ada"], 1000000001, ["bob"], "spe-2"), 422,
-                 "amount > 1e9 (R73)")
+                 "validation_failed", "amount > 1e9 (R73)")
     expect_error(split(c, toks["ada"], "100", ["bob"], "spe-3"), 422,
-                 "string amount (R73/R38)")
+                 "validation_failed", "string amount (R73/R38)")
     expect_error(split(c, toks["ada"], 100, [], "spe-4"), 422,
-                 "empty participant_handles (R73)")
+                 "validation_failed", "empty participant_handles (R73)")
     expect_error(split(c, toks["ada"], 100, ["bob", "bob"], "spe-5"), 422,
-                 "duplicate handle (R73)")
+                 "validation_failed", "duplicate handle (R73)")
     expect_error(split(c, toks["ada"], 100, ["bob", "nobody"], "spe-6"), 404,
-                 "unknown handle (R73)")
+                 "not_found", "unknown handle (R73)")
     expect_error(split(c, toks["ada"], 100, ["bob"], "spe-7", note="n" * 201), 422,
-                 "long note (R73)")
+                 "validation_failed", "long note (R73)")
     r = c.post("/splits", raw_body='{"amount":10,"participant_handles":[5]}',
                token=toks["ada"], headers={"Idempotency-Key": "spe-8"})
-    expect_error(r, 400, "non-string handle entries are wrong JSON type (R40)")
+    expect_error(r, 400, "malformed_request",
+                 "non-string handle entries are wrong JSON type (R40)")
 
 
 def test_split_order_dependence(c):
@@ -148,8 +150,8 @@ def test_conservation_after_paying_splits(c):
     toks = fresh(c)
     seeded_total = sum(u["balance"] for u in [
         {"balance": 100000}, {"balance": 50000}, {"balance": 0}])
-    r1 = expect_ok(split(c, toks["ada"], 1000, ["ada", "bob", "cy"], "cons-1"), 201)
-    r2 = expect_ok(split(c, toks["bob"], 10, ["ada", "bob", "cy"], "cons-2"), 201)
+    r1 = expect_ok(split(c, toks["ada"], 1000, ["ada", "bob"], "cons-1"), 201)
+    r2 = expect_ok(split(c, toks["bob"], 10, ["bob", "ada"], "cons-2"), 201)
     for rq in r1["requests"] + r2["requests"]:
         expect_ok(c.post(f"/requests/{rq['request_id']}/pay", body={},
                          token=c.token_for(rq["payer_handle"]),

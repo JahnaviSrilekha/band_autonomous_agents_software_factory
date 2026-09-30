@@ -1,7 +1,8 @@
 """Feed contract (R26-R29, R75, R92 feed visibility)."""
 import time
 
-from client import (check, eq, expect_ok, fresh, get_me, make_payment)
+from client import (check, eq, expect_error, expect_ok, fresh, fuser, get_me,
+                    make_payment)
 
 
 def visible_ids(c, tok):
@@ -18,13 +19,15 @@ def visible_ids(c, tok):
 
 def test_feed_iff_rule(c):
     # Exhaustive per-caller filter: public OR sender/receiver (R26).
-    toks = fresh(c)
-    p1 = expect_ok(make_payment(c, toks["ada"], "bob", 100, "f-1"), 201).json()   # public
+    users = [fuser("u_ada", "ada", 100000), fuser("u_bob", "bob", 50000),
+             fuser("u_cy", "cy", 1000)]
+    toks = fresh(c, users=users)
+    p1 = expect_ok(make_payment(c, toks["ada"], "bob", 100, "f-1"), 201)   # public
     p2 = expect_ok(make_payment(c, toks["bob"], "cy", 200, "f-2",
-                                visibility="private"), 201).json()
-    p3 = expect_ok(make_payment(c, toks["cy"], "ada", 300, "f-3"), 201).json()
+                                visibility="private"), 201)
+    p3 = expect_ok(make_payment(c, toks["cy"], "ada", 300, "f-3"), 201)
     p4 = expect_ok(make_payment(c, toks["ada"], "cy", 400, "f-4",
-                                visibility="private"), 201).json()
+                                visibility="private"), 201)
     want = {
         "ada": {p1["payment_id"], p3["payment_id"], p4["payment_id"]},
         # bob sees public p1+p3 plus own p2 (receiver p1, sender p2)
@@ -40,7 +43,7 @@ def test_feed_iff_rule(c):
 def test_private_hidden_from_third_party_not_receiver(c):
     toks = fresh(c)
     p = expect_ok(make_payment(c, toks["ada"], "bob", 100, "pf-1",
-                               visibility="private"), 201).json()
+                               visibility="private"), 201)
     check(p["payment_id"] in visible_ids(c, toks["ada"]),
           "sender sees own private payment (R29)")
     check(p["payment_id"] in visible_ids(c, toks["bob"]),
@@ -52,7 +55,7 @@ def test_private_hidden_from_third_party_not_receiver(c):
 def test_visibility_identical_to_both_parties(c):
     toks = fresh(c)
     p = expect_ok(make_payment(c, toks["ada"], "bob", 100, "vf-1",
-                               visibility="private"), 201).json()
+                               visibility="private"), 201)
     for tok in (toks["ada"], toks["bob"]):
         item = [x for x in expect_ok(c.get("/activity", token=tok), 200)["payments"]
                 if x["payment_id"] == p["payment_id"]][0]
@@ -99,10 +102,10 @@ def test_split_not_a_feed_item(c):
 def test_feed_order_and_paging(c):
     toks = fresh(c)
     first_batch = [expect_ok(make_payment(c, toks["ada"], "bob", 10 + i, f"ord-{i}"),
-                             201).json()["payment_id"] for i in range(3)]
+                             201)["payment_id"] for i in range(3)]
     time.sleep(1.1)  # cross the second boundary; same-second order is unspecified (A3)
     second_batch = [expect_ok(make_payment(c, toks["ada"], "bob", 20 + i, f"ord2-{i}"),
-                              201).json()["payment_id"] for i in range(3)]
+                              201)["payment_id"] for i in range(3)]
     ids = visible_ids(c, toks["ada"])
     eq(set(ids), set(first_batch + second_batch), "all payments visible")
     check(ids.index(second_batch[0]) < ids.index(first_batch[0]),
@@ -121,7 +124,11 @@ def test_feed_order_and_paging(c):
 
 def test_activity_validation(c):
     toks = fresh(c)
-    expect_error(c.get("/activity?limit=0", token=toks["ada"]), 422, "limit 0 (R41)")
-    expect_error(c.get("/activity?limit=201", token=toks["ada"]), 422, "limit 201 (R41)")
-    expect_error(c.get("/activity?offset=-1", token=toks["ada"]), 422, "offset -1 (R41)")
-    expect_error(c.get("/activity?limit=2.5", token=toks["ada"]), 422, "limit 2.5 (R39)")
+    expect_error(c.get("/activity?limit=0", token=toks["ada"]), 422, "validation_failed",
+                 "limit 0 (R41)")
+    expect_error(c.get("/activity?limit=201", token=toks["ada"]), 422, "validation_failed",
+                 "limit 201 (R41)")
+    expect_error(c.get("/activity?offset=-1", token=toks["ada"]), 422, "validation_failed",
+                 "offset -1 (R41)")
+    expect_error(c.get("/activity?limit=2.5", token=toks["ada"]), 422, "validation_failed",
+                 "limit 2.5 (R39)")
