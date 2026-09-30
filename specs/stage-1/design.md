@@ -77,8 +77,9 @@ No stage-1 endpoint or behavior depends on the two ever differing.
 
 Fixed order, matching §7 and R54 exactly:
 
-1. Read and parse the JSON body. Unparseable → `400 malformed_request` (no lock, no
-   idempotency interaction — R54 only starts after the body parses as an object).
+1. Read and parse the JSON body. Unparseable, **or parses to a JSON value that is not an
+   object** (array, string, number, boolean, `null`) → `400 malformed_request` (no lock, no
+   idempotency interaction — R54 only starts after the body parses as an object; see A8).
 2. Authenticate the bearer token. Missing/unknown → `401 unauthenticated`.
 3. Require and read `Idempotency-Key`. Absent/empty → `400 missing_idempotency_key`.
 4. Acquire `STATE_LOCK`. Look up `(user_id, method, path, key)`:
@@ -106,9 +107,16 @@ idempotency key, per §8) but still run under `STATE_LOCK` for their state trans
 ## 6. Canonical body comparison
 
 The claimed request body is stored as the parsed JSON value (Python `dict`/`list`/scalar
-tree), not as a string. "Same body" (R50) is Python structural equality (`==`) on that parsed
-value — this already ignores key order and whitespace, and treats `1000`, `1000.0`, `1e3` as
-equal (all parse to the numeric value `1000`) consistent with R18.
+tree), not as a string. "Same body" (R50) is a **JSON-type-aware** structural equality on
+that parsed value — recursive `dict`/`list` comparison, but scalar comparison must not use
+bare Python `==`, because Python treats `True == 1` and `False == 0`: a body that differs
+from the original only by swapping a `1`/`0` for `true`/`false` in some field would wrongly
+compare equal and replay 200 instead of correctly returning `409 idempotency_key_reuse`.
+The comparison function instead checks, per scalar: `bool` values are equal only to `bool`
+values of the same truthiness; numbers (`int`/`float`) are equal only to other numbers, by
+numeric value (so `1000`, `1000.0`, `1e3` are equal, per R18); strings and `None` compare as
+themselves and never equal a `bool` or a number. This already ignores key order and
+whitespace by construction (comparison is on the parsed tree, not the source text).
 
 ## 7. Rounding function (R76)
 

@@ -49,7 +49,7 @@ Kind values: behaviour, error, limit, concurrency, retry, time, compatibility, i
   server binds `0.0.0.0:$PORT`, defaults to 8080 when unset.
 - **R13** (behaviour, time). `GET /health` → 200 `{"status":"ok"}` once service/store can serve
   requests, within 60s of start; non-200 permitted before ready — Acceptance: health check
-  passes within 60s and stays 200 thereafter.
+  passes within 60s and stays 200 thereafter, and the body is exactly `{"status":"ok"}`.
 - **R14** (behaviour). `POST /_test/reset` replaces all state with the fixture body, returns 204;
   subsequent requests see only that fixture; repeated resets supported; unauthenticated —
   Acceptance: after 204, `GET /me`/`/activity`/etc. reflect only fixture data; calling reset again
@@ -221,8 +221,13 @@ Kind values: behaviour, error, limit, concurrency, retry, time, compatibility, i
 ### POST /payments
 - **R56** (interface, retry). Idempotent write; body `to_handle,amount,note?(default ""),
   visibility?(default "public")`; 201 body includes `payment_id,from_user_id,from_handle,
-  to_user_id,to_handle,amount,currency,note,visibility,request_id:null,created_at` —
-  Acceptance: exact shape/defaults.
+  to_user_id,to_handle,amount,currency,note,visibility,request_id:null,created_at,
+  settlement_id:null` — Acceptance: exact shape/defaults, including `settlement_id` present
+  and `null` (this endpoint never creates a settlement member). Every payment representation
+  returned anywhere in the API (this response, `GET /activity` items, the payment embedded in
+  a `POST /requests/{id}/pay` response, and each entry of a settlement's `payments[]`) shares
+  this exact same shape; `settlement_id` is `null` except on a settlement's own members
+  (R91).
 - **R57** (error). Case table: balance below `amount` → 409 `insufficient_funds`; `amount` <1,
   >1e9, or non-integer → 422 `validation_failed`; `to_handle` == caller's own handle → 422
   `self_payment`; `note` >200 chars → 422 `validation_failed`; `visibility` not
@@ -298,9 +303,11 @@ Kind values: behaviour, error, limit, concurrency, retry, time, compatibility, i
 
 ### GET /activity
 - **R75** (interface). Query `limit,offset` as `/requests`; payments visible per feed contract
-  (R26), newest first by `created_at`; relative order of same-second payments unspecified;
-  stable pagination during concurrent writes not required — Acceptance: exact filter/paging;
-  same-second ordering not asserted by tests (A3).
+  (R26), newest first by `created_at`; response body `{"payments":[...],"has_more":bool}`;
+  relative order of same-second payments unspecified; stable pagination during concurrent
+  writes not required — Acceptance: exact filter/paging including `has_more` (true when items
+  exist beyond the returned page, same rule as R69); same-second ordering not asserted by
+  tests (A3).
 
 ## Money and rounding (§9)
 
@@ -337,7 +344,9 @@ Kind values: behaviour, error, limit, concurrency, retry, time, compatibility, i
   regenerated or replayed against an already-net balance; failed request keys remain reusable;
   existing receipts/tokens/retries remain valid after import — Acceptance: post-import, an old
   token still authenticates, a completed idempotency key still replays its original response
-  without moving money again, and a previously-failed key is still usable as a first use.
+  without moving money again, a previously-failed key is still usable as a first use, **and a
+  user can still log in with their pre-import password** (hashed-password login is preserved,
+  not just the token).
 - **R83** (behaviour). Import removes all previous destination data/credentials (full
   replacement) — Acceptance: pre-import state not merged with imported state.
 - **R84** (behaviour). Reset clears all state, including imported state — Acceptance: reset
@@ -359,7 +368,10 @@ Kind values: behaviour, error, limit, concurrency, retry, time, compatibility, i
   `forbidden`; unknown handle → 404; self-transfer → 422 `self_payment`; malformed batch shape
   → 422 `validation_failed`; "entry errors take precedence in input order, before insufficient
   funds"; unknown fields ignored — Acceptance: validate every entry (in order) for
-  shape/handle/self-transfer errors before any affordability check.
+  shape/handle/self-transfer errors before any affordability check. "Malformed batch shape"
+  includes `transfers` not being an array, `transfers` containing a non-object entry, and an
+  entry whose `from_handle`/`to_handle`/`amount` is present with the wrong JSON type — all
+  422 `validation_failed`, not 400 (see A9).
 - **R89** (behaviour, concurrency). A settlement is affordable when every wallet's balance after
   all incoming and outgoing transfers is nonnegative (net effect, not per-transfer sequential
   check); insufficient collective funds → 409 `insufficient_funds` — Acceptance: affordability
@@ -405,8 +417,52 @@ Kind values: behaviour, error, limit, concurrency, retry, time, compatibility, i
   fixtures use but does not give a distinct error code for an out-of-set value.
 - **A6**. The `Idempotency-Key` header requirement (§7/R48) does not apply to
   `POST /requests/{id}/decline` or `.../cancel` (explicitly "No idempotency key" per §8), nor to
-  non-write/read endpoints, `/auth/*`, `/_test/*`.
+  non-write/read endpoints, `/auth/*`, `/_test/*`. If a client supplies the header on
+  decline/cancel anyway, it is ignored entirely — not read, not claimed, not consumed — so a
+  later write elsewhere reusing the same key string is a fresh first use. Reasoning: these two
+  endpoints are outside the five idempotent write paths entirely (§7 names exactly five), so
+  there is no mechanism for them to interact with the idempotency table at all.
 - **A7**. "Password shorter than 8 characters" (R44) is checked independently of email-format
   validation; when both are invalid we return whichever our fixed per-endpoint order picks
   first (A1) — the spec does not state relative precedence between the two signup validation
   errors.
+- **A8**. A request body on one of the five idempotent write paths that parses as valid JSON
+  but whose top-level value is not a JSON object (an array, string, number, boolean, or
+  `null`) is treated the same as a body that does not parse at all: `400 malformed_request`,
+  returned before authentication and before any idempotency-key interaction (it is neither
+  claimed nor freed). Reasoning: R54 gates idempotency-key resolution behind "the body has
+  parsed as a JSON object," so a non-object body must be rejected earlier in the pipeline than
+  that gate; R40 reserves 400 for "a body that does not parse or a field of the wrong type,"
+  and the top-level value being the wrong type is such a case.
+- **A9**. Within a `POST /settlements` body, `transfers` not being an array, `transfers`
+  containing a non-object entry, or an entry's `from_handle`/`to_handle`/`amount` being present
+  with the wrong JSON type, is `422 validation_failed` ("malformed batch shape," §11) rather
+  than the general `400 malformed_request`. Reasoning: §5 states endpoint-specific field rules
+  take precedence over the general wrong-type-is-400 rule, and §11 explicitly names "malformed
+  batch shape" as a 422 case; a wrong-typed field inside a transfer entry is such a shape
+  defect, the same pattern as the existing endpoint-specific overrides for `amount`/`note`/
+  `visibility` elsewhere (R38).
+- **A10**. `POST /auth/signup` requires `email`, `password` and `display_name` all present;
+  a missing one is `422 validation_failed`; one present with the wrong JSON type (e.g. a
+  number) is `400 malformed_request` (R40); `display_name` has no stated length limit and none
+  is enforced. Reasoning: §6 states endpoint-specific overrides only for password length and
+  email format, so presence/type of the three fields otherwise follows the general rule
+  (required-and-missing → 422, wrong type → 400).
+- **A11**. Email matching, for uniqueness (`409 email_taken`) and for login lookup, is exact
+  case-sensitive string comparison; `A@x.com` and `a@x.com` are different emails. Reasoning:
+  §4 states an explicit lowercase-and-sanitize rule for the *derived handle*, but states no
+  normalisation rule for the email address itself; the conservative reading applies no
+  normalisation the spec doesn't state.
+- **A12**. A reset fixture's `requests[]` entries are only ever seeded with `status:"pending"`
+  in practice; if a fixture nonetheless supplies a different status value, it is accepted
+  verbatim (no validation error — no rule forbids it), but the implementation does not
+  synthesize a `payment_id` or a backing payment for it, since the fixture format has no field
+  to supply one. Reasoning: the spec's only example seeds `pending`, and states neither an
+  error case nor a backing-payment rule for other statuses, so the conservative choice is
+  to neither reject the input nor fabricate missing linkage.
+- **A13**. A reset fixture missing `currency`, or with `currency` not a non-empty string, is a
+  fixture validation error: `422 validation_failed` from `POST /_test/reset`, state unchanged.
+  Reasoning: mirrors R15's treatment of an invalid fixture value (negative seeded balance is
+  also 422, not 400) — §4 states the fixture "declares" the currency but gives no distinct
+  error code for a missing/invalid one, so this keeps one consistent code for fixture-shape
+  defects.

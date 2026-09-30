@@ -8,7 +8,7 @@ files live under `stage-1/src/pocketful/`. Status starts `pending`; developer fl
 
 | id | reqs | files | deps | done test | status | batch |
 |---|---|---|---|---|---|---|
-| T1 | R6,R7,R8,R12,R16,R35,R36,R40,R42 | `src/pocketful/server.py`, `src/pocketful/errors.py`, `src/pocketful/__main__.py` | — | `GET /health` (before reset) does not 500; unknown route → 404 `not_found`; every error response matches `{"error":{"code","message"}}` | pending | 1 |
+| T1 | R5,R6,R7,R8,R12,R16,R35,R36,R37,R40,R42 | `src/pocketful/server.py`, `src/pocketful/errors.py`, `src/pocketful/__main__.py` | — | `GET /health` (before reset) does not 500; unknown route → 404 `not_found`; every error response matches `{"error":{"code","message"}}`; integer amounts round-trip exactly with no float rounding error (R5); an out-of-range-but-correctly-typed field gives 422 not 400 (R37) | pending | 1 |
 | T2 | R6,R8,R9,R10,R11,R13 | `Dockerfile`, `RUN.md` | T1 | `docker build` + documented run command; `GET /health` returns 200 within 60s with no network | pending | 1 |
 | T3 | R14,R15,R17,R31,R32,R33,R34,R84,A5 | `src/pocketful/state.py`, `src/pocketful/reset.py` | T1 | `POST /_test/reset` with the spec's example fixture → 204; `GET /me` for a seeded user (after login) matches fixture; negative-balance fixture → 422, prior state untouched; repeated reset works | pending | 1 |
 | T4 | R48,R49,R50,R51,R52,R53,R54,R56(shape only) | `src/pocketful/idempotency.py` | T1,T3 | Unit tests: fresh key → claim+execute; replay same body → stored response, no re-execution; same key diff body → 409; failed (4xx) attempt frees key; concurrent identical requests against a fake mutator → exactly one execution | pending | 1 |
@@ -17,7 +17,7 @@ files live under `stage-1/src/pocketful/`. Status starts `pending`; developer fl
 
 | id | reqs | files | deps | done test | status | batch |
 |---|---|---|---|---|---|---|
-| T5 | R19,R20,R43,R44,R47 | `src/pocketful/auth.py` (signup) | T3 | Signup happy path → 201 shape; email taken → 409; short password → 422; bad email format → 422; derived-handle collision → 409 `handle_taken`, no user created; stored password is a scrypt hash, not plaintext | pending | 2 |
+| T5 | R19,R20,R21,R43,R44,R47 | `src/pocketful/auth.py` (signup) | T3 | Signup happy path → 201 shape; email taken → 409; short password → 422; bad email format → 422; derived-handle collision → 409 `handle_taken`, no user created; stored password is a scrypt hash, not plaintext; new user's balance is 0 and can immediately receive a payment/request (R21) | pending | 2 |
 | T6 | R43,R44,R46 | `src/pocketful/auth.py` (login) | T5 | Login happy path → 200 same shape as signup; wrong password/unknown email → 401; two logins for same user → two independently valid tokens | pending | 2 |
 | T7 | R45,R55 | `src/pocketful/middleware.py`, `src/pocketful/handlers/me.py` | T6 | `GET /me` with valid token → exact shape; missing/garbage/unknown token → 401 on `/me` and on a write endpoint stub | pending | 2 |
 
@@ -25,7 +25,7 @@ files live under `stage-1/src/pocketful/`. Status starts `pending`; developer fl
 
 | id | reqs | files | deps | done test | status | batch |
 |---|---|---|---|---|---|---|
-| T8 | R22,R56,R57,R58,R59,R18,R30 | `src/pocketful/handlers/payments.py` | T4,T7 | Full case table from R57; atomic debit/credit (no partial state on failure); note round-trips unicode/emoji byte-for-byte; conservation holds after N concurrent payments (sum unchanged) | pending | 3 |
+| T8 | R4,R22,R38,R56,R57,R58,R59,R18,R30 | `src/pocketful/handlers/payments.py` | T4,T7 | Full case table from R57; atomic debit/credit (no partial state on failure); note round-trips unicode/emoji byte-for-byte; conservation holds after N concurrent payments (sum unchanged); money never created/destroyed — no path other than debit+credit between existing wallets changes a balance (R4); amount/note/visibility type overrides are 422 not 400 (R38) | pending | 3 |
 | T9 | R23,R24,R25,R60,R61,R62 | `src/pocketful/handlers/requests.py` (create) | T7 | Case table from R61; over-balance request created as `pending`, no balance check | pending | 3 |
 | T10 | R63,R64,R65,R66 | `src/pocketful/handlers/requests.py` (pay) | T8,T9 | Case table from R65; pay body defaults + strict body-equality on replay (R63); replay-after-paid returns 200 original payment, no `409 request_not_pending` | pending | 3 |
 | T11 | R67,R68 | `src/pocketful/handlers/requests.py` (decline/cancel) | T9 | Decline/cancel happy path, repeat-of-same-terminal-state → 200, wrong-party → 403, wrong-status → 409 | pending | 3 |
@@ -50,6 +50,9 @@ files live under `stage-1/src/pocketful/`. Status starts `pending`; developer fl
 
 ## Coverage
 
-Every requirement R1-R93 and assumption A1-A7 is referenced by at least one task above (A1/A2
-are cross-cutting, applied in T8-T10,T15-T16 per design.md §10; A3-A7 are covered by T13,T3,T5,
-T3,T5 respectively).
+Every requirement R1-R93 and assumption A1-A13 is referenced by at least one task above,
+verified by grepping the `reqs` column (fixed 2026-09-30 after the tester's completeness
+review flagged R4, R5, R21, R37, R38 as unreferenced — now in T8, T1, T5, T1, T8
+respectively). A1/A2 are cross-cutting, applied in T8-T10,T15-T16 per design.md §10; A3 is
+T13; A4 is T3; A5 is T3; A6 is T11; A7 is T5; A8 is T1/T4 (body-type gate before idempotency
+resolution); A9 is T16; A10-A11 are T5; A12-A13 are T3.
