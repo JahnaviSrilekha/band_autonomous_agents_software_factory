@@ -28,7 +28,7 @@ individually.
 
 | id | reqs | files | deps | done test | status | batch |
 |---|---|---|---|---|---|---|
-| T27 | R115,R130,R131,R132,R135 | `src/pocketful/handlers/export_import.py` | T20,T22,T23,T24 | Export emits `format_version:2` with `authorization_ttl_seconds`/`authorizations` (incl. `captured_amount`/`payment_ids` on partially-captured records); import accepts `format_version:1` (defaults `authorization_ttl_seconds=600`, `authorizations={}`, then loads the rest exactly as stage-1 T18 already verified) and `format_version:2`; export→import round trip on a state with open/captured/voided/expired authorizations is a behavioral no-op; unknown version still 422, unchanged | pending | 3 |
+| T27 | R115,R130,R131,R132,R135 | `src/pocketful/handlers/export_import.py` | T20,T22,T23,T24 | Export emits `format_version:2` with `authorization_ttl_seconds`/`authorizations` (incl. `captured_amount`/`payment_ids` on partially-captured records); import accepts `format_version:1` (defaults `authorization_ttl_seconds=600`, `authorizations={}`, then loads the rest exactly as stage-1 T18 already verified) and `format_version:2`; export→import round trip on a state with open/captured/voided/expired authorizations is a behavioral no-op; unknown version still 422, unchanged | done | 3 |
 
 ## Batch 4 — UI
 

@@ -1,15 +1,17 @@
 from ..errors import ApiError
 from .. import state as state_module
 from ..state import (
-    STATE_LOCK, IdempotencyRecord, Payment, Request, Settlement, Split, State, User,
+    AUTHORIZATION_STATUSES, STATE_LOCK, Authorization, IdempotencyRecord, Payment, Request,
+    Settlement, Split, State, User, parse_rfc3339,
 )
-from ..reset import HANDLE_RE, _fixture_amount, _fixture_string
+from ..reset import HANDLE_RE, _fixture_amount, _fixture_string, _fixture_ttl
 
 
 def state_to_json(state):
     return {
         "currency": state.currency,
         "minor_units": state.minor_units,
+        "authorization_ttl_seconds": state.authorization_ttl_seconds,
         "seq": state.seq,
         "settlement_operator_ids": sorted(state.settlement_operator_ids),
         "users": [
@@ -24,7 +26,7 @@ def state_to_json(state):
              "to_user_id": p.to_user_id, "amount": p.amount, "note": p.note,
              "visibility": p.visibility, "request_id": p.request_id,
              "settlement_id": p.settlement_id, "effective_at": p.effective_at,
-             "recorded_at": p.recorded_at}
+             "recorded_at": p.recorded_at, "authorization_id": p.authorization_id}
             for p in state.payments
         ],
         "requests": [
@@ -32,6 +34,14 @@ def state_to_json(state):
              "payer_id": r.payer_id, "amount": r.amount, "note": r.note,
              "status": r.status, "payment_id": r.payment_id, "created_at": r.created_at}
             for r in state.requests.values()
+        ],
+        "authorizations": [
+            {"id": a.id, "seq": a.seq, "from_user_id": a.from_user_id,
+             "to_user_id": a.to_user_id, "amount": a.amount, "note": a.note,
+             "visibility": a.visibility, "status": a.status,
+             "captured_amount": a.captured_amount, "payment_ids": list(a.payment_ids),
+             "created_at": a.created_at, "expires_at": a.expires_at}
+            for a in state.authorizations.values()
         ],
         "splits": [
             {"id": s.id, "seq": s.seq, "caller_id": s.caller_id, "amount": s.amount,
@@ -75,6 +85,7 @@ def state_from_json(payload):
     if int(minor_units) not in (0, 2, 3):
         raise ApiError(422, "validation_failed", "minor_units must be 0, 2 or 3")
     state.minor_units = int(minor_units)
+    state.authorization_ttl_seconds = _fixture_ttl(payload)
     seq = payload.get("seq")
     if isinstance(seq, bool) or not isinstance(seq, int) or seq < 0:
         raise ApiError(422, "validation_failed", "seq must be a non-negative integer")
@@ -113,6 +124,11 @@ def state_from_json(payload):
             raise ApiError(422, "validation_failed", "each request must be an object")
         request = _request_from_json(state, entry)
         state.requests[request.id] = request
+    for entry in _authorization_list(payload):
+        if not isinstance(entry, dict):
+            raise ApiError(422, "validation_failed", "each authorization must be an object")
+        authorization = _authorization_from_json(state, entry)
+        state.authorizations[authorization.id] = authorization
     for entry in _require_list(payload, "payments"):
         if not isinstance(entry, dict):
             raise ApiError(422, "validation_failed", "each payment must be an object")
@@ -162,6 +178,59 @@ def _request_from_json(state, entry):
                    payment_id, created_at, record_seq)
 
 
+def _authorization_list(payload):
+    value = payload.get("authorizations", [])
+    if not isinstance(value, list):
+        raise ApiError(422, "validation_failed", "authorizations must be an array")
+    return value
+
+
+def _authorization_from_json(state, entry):
+    authorization_id = _fixture_string(entry, "id")
+    from_user_id = _fixture_string(entry, "from_user_id")
+    to_user_id = _fixture_string(entry, "to_user_id")
+    if from_user_id not in state.users or to_user_id not in state.users:
+        raise ApiError(422, "validation_failed", "authorization references an unknown user")
+    if authorization_id in state.authorizations:
+        raise ApiError(422, "validation_failed", "duplicate authorization id")
+    amount = _fixture_amount(entry.get("amount"), 0, "authorization amount")
+    note = entry.get("note", "")
+    if not isinstance(note, str):
+        raise ApiError(422, "validation_failed", "note must be a string")
+    visibility = entry.get("visibility")
+    if visibility not in ("public", "private"):
+        raise ApiError(422, "validation_failed", 'visibility must be "public" or "private"')
+    status = entry.get("status")
+    if status not in AUTHORIZATION_STATUSES:
+        raise ApiError(422, "validation_failed",
+                       'authorization status must be open, captured, voided or expired')
+    captured_amount = entry.get("captured_amount")
+    if captured_amount is None:
+        captured_amount = amount if status == "captured" else 0
+    else:
+        if isinstance(captured_amount, bool) or not isinstance(captured_amount, int):
+            raise ApiError(422, "validation_failed",
+                           "authorization captured_amount must be an integer")
+        if captured_amount < 0 or captured_amount > amount:
+            raise ApiError(422, "validation_failed",
+                           "authorization captured_amount must be between 0 and amount")
+    payment_ids = entry.get("payment_ids", [])
+    if not isinstance(payment_ids, list) or not all(isinstance(p, str) for p in payment_ids):
+        raise ApiError(422, "validation_failed",
+                       "authorization payment_ids must be an array of strings")
+    created_at = entry.get("created_at")
+    if not isinstance(created_at, str):
+        raise ApiError(422, "validation_failed", "created_at must be a string")
+    expires_at = entry.get("expires_at")
+    expires_dt = parse_rfc3339(expires_at, "authorization expires_at")
+    record_seq = entry.get("seq", 0)
+    if isinstance(record_seq, bool) or not isinstance(record_seq, int) or record_seq < 0:
+        raise ApiError(422, "validation_failed", "authorization seq must be a non-negative integer")
+    return Authorization(authorization_id, from_user_id, to_user_id, amount, note,
+                         visibility, status, captured_amount, list(payment_ids),
+                         created_at, expires_at, expires_dt, seq=record_seq)
+
+
 def _payment_from_json(state, entry):
     payment_id = _fixture_string(entry, "id")
     from_user_id = _fixture_string(entry, "from_user_id")
@@ -182,6 +251,10 @@ def _payment_from_json(state, entry):
     settlement_id = entry.get("settlement_id")
     if settlement_id is not None and not isinstance(settlement_id, str):
         raise ApiError(422, "validation_failed", "settlement_id must be a string or null")
+    authorization_id = entry.get("authorization_id")
+    if authorization_id is not None:
+        if not isinstance(authorization_id, str) or authorization_id not in state.authorizations:
+            raise ApiError(422, "validation_failed", "payment references an unknown authorization")
     effective_at = entry.get("effective_at")
     recorded_at = entry.get("recorded_at")
     if not isinstance(effective_at, str) or not isinstance(recorded_at, str):
@@ -190,7 +263,8 @@ def _payment_from_json(state, entry):
     if isinstance(record_seq, bool) or not isinstance(record_seq, int):
         raise ApiError(422, "validation_failed", "payment seq must be an integer")
     return Payment(payment_id, from_user_id, to_user_id, amount, note, visibility,
-                   request_id, settlement_id, effective_at, recorded_at, record_seq)
+                   request_id, settlement_id, effective_at, recorded_at, record_seq,
+                   authorization_id)
 
 
 def _split_from_json(state, entry):
@@ -262,15 +336,16 @@ def _idempotency_from_json(state, entry):
 def handle_export(user, body, params, query):
     with STATE_LOCK:
         state = state_module.STATE
-        return 200, {"track": "pocketful", "format_version": 1, "state": state_to_json(state)}
+        return 200, {"track": "pocketful", "format_version": 2, "state": state_to_json(state)}
 
 
 def handle_import(user, body, params, query):
     if body.get("track") != "pocketful":
         raise ApiError(422, "validation_failed", "track must be pocketful")
     version = body.get("format_version")
-    if isinstance(version, bool) or not isinstance(version, (int, float)) or version != 1:
-        raise ApiError(422, "validation_failed", "format_version must be 1")
+    if (isinstance(version, bool) or not isinstance(version, (int, float))
+            or version not in (1, 2)):
+        raise ApiError(422, "validation_failed", "format_version must be 1 or 2")
     payload_state = body.get("state")
     if not isinstance(payload_state, dict):
         raise ApiError(422, "validation_failed", "state is required")

@@ -81,7 +81,7 @@ class TestExport(unittest.TestCase):
         status, payload, _ = base.request(self.port, "GET", "/_test/export")
         self.assertEqual(status, 200)
         self.assertEqual(payload["track"], "pocketful")
-        self.assertEqual(payload["format_version"], 1)
+        self.assertEqual(payload["format_version"], 2)
         self.assertIsInstance(payload["state"], dict)
 
     def test_export_is_atomic_snapshot(self):
@@ -190,7 +190,7 @@ class TestImport(unittest.TestCase):
         before = state_module.STATE
         cases = [
             {"track": "other", "format_version": 1, "state": self.exported["state"]},
-            {"track": "pocketful", "format_version": 2, "state": self.exported["state"]},
+            {"track": "pocketful", "format_version": 3, "state": self.exported["state"]},
             {"track": "pocketful", "format_version": 1},
             {"track": "pocketful", "format_version": 1, "state": {"zzz": 1}},
         ]
