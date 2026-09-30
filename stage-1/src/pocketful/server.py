@@ -33,6 +33,15 @@ def _health(user, body, params, query):
 ROUTES.append(Route("GET", r"^/health$", _health))
 
 
+def _add_reset_route():
+    from .reset import handle_reset
+
+    ROUTES.append(Route("POST", r"^/_test/reset$", handle_reset))
+
+
+_add_reset_route()
+
+
 def _authenticate(headers):
     from . import state as state_module
 

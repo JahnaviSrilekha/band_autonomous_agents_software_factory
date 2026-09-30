@@ -10,7 +10,7 @@ files live under `stage-1/src/pocketful/`. Status starts `pending`; developer fl
 |---|---|---|---|---|---|---|
 | T1 | R5,R6,R7,R8,R12,R16,R35,R36,R37,R40,R42 | `src/pocketful/server.py`, `src/pocketful/errors.py`, `src/pocketful/__main__.py` | — | `GET /health` (before reset) does not 500; unknown route → 404 `not_found`; every error response matches `{"error":{"code","message"}}`; integer amounts round-trip exactly with no float rounding error (R5); an out-of-range-but-correctly-typed field gives 422 not 400 (R37) | done | 1 |
 | T2 | R6,R8,R9,R10,R11,R13 | `Dockerfile`, `RUN.md` | T1 | `docker build` + documented run command; `GET /health` returns 200 within 60s with no network | pending | 1 |
-| T3 | R14,R15,R17,R31,R32,R33,R34,R84,A5 | `src/pocketful/state.py`, `src/pocketful/reset.py` | T1 | `POST /_test/reset` with the spec's example fixture → 204; `GET /me` for a seeded user (after login) matches fixture; negative-balance fixture → 422, prior state untouched; repeated reset works | pending | 1 |
+| T3 | R14,R15,R17,R31,R32,R33,R34,R84,A5 | `src/pocketful/state.py`, `src/pocketful/reset.py` | T1 | `POST /_test/reset` with the spec's example fixture → 204; `GET /me` for a seeded user (after login) matches fixture; negative-balance fixture → 422, prior state untouched; repeated reset works | done | 1 |
 | T4 | R48,R49,R50,R51,R52,R53,R54,R56(shape only) | `src/pocketful/idempotency.py` | T1,T3 | Unit tests: fresh key → claim+execute; replay same body → stored response, no re-execution; same key diff body → 409; failed (4xx) attempt frees key; concurrent identical requests against a fake mutator → exactly one execution | pending | 1 |
 
 ## Batch 2 — identity and auth
