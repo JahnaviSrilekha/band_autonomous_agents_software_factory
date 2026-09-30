@@ -1,0 +1,338 @@
+{
+ "export": {
+  "track": "pocketful",
+  "format_version": 1,
+  "state": {
+   "currency": "EUR",
+   "minor_units": 2,
+   "seq": 7,
+   "settlement_operator_ids": [],
+   "users": [
+    {
+     "id": "u_ada",
+     "email": "ada@example.com",
+     "password_hash": "7821d6aaaeec528a341b8d8f8fbc52dc:05804aed16a684929c3281beef56a19c79e70700491a036b1db92d0aae085700",
+     "display_name": "Ada",
+     "handle": "ada",
+     "balance": 96500
+    },
+    {
+     "id": "u_bob",
+     "email": "bob@example.com",
+     "password_hash": "64a710b13ca546476c8bdedac407feee:1871ff0c114fe78f41d6ea9ac00782851c5419f2693a49f79ecd2eee76429c3d",
+     "display_name": "Bob",
+     "handle": "bob",
+     "balance": 52750
+    },
+    {
+     "id": "u_cy",
+     "email": "cy@example.com",
+     "password_hash": "9a28f01a41f0431fc97ee518548a58ed:896485e6d6761b07dc2f93628420eba242773d76acffb17f70ea397a5a511710",
+     "display_name": "Cy",
+     "handle": "cy",
+     "balance": 750
+    }
+   ],
+   "tokens": [
+    {
+     "token": "32j6xsyIfnoBihprMZiys0gAXlWwntl-yH1l_ZeY1vI",
+     "user_id": "u_ada"
+    },
+    {
+     "token": "qgZVskHorIfCzaabYVQ7iO4kUz6FkEJpfWWGq17NWPs",
+     "user_id": "u_bob"
+    },
+    {
+     "token": "opvf9Rag6AC0GpvhQ39TTFwDvBeE5JQJ8_MdJMU7a48",
+     "user_id": "u_cy"
+    }
+   ],
+   "payments": [
+    {
+     "id": "p_a381aae5efdc4dc7838f2f3936959ba7",
+     "seq": 1,
+     "from_user_id": "u_ada",
+     "to_user_id": "u_bob",
+     "amount": 2500,
+     "note": "lost response",
+     "visibility": "public",
+     "request_id": null,
+     "settlement_id": null,
+     "effective_at": "2026-09-30T19:53:48.283292+00:00",
+     "recorded_at": "2026-09-30T19:53:48.283292+00:00"
+    },
+    {
+     "id": "p_82c656ebc20d493982f0d25bfe187f2c",
+     "seq": 2,
+     "from_user_id": "u_ada",
+     "to_user_id": "u_bob",
+     "amount": 1000,
+     "note": "lunch",
+     "visibility": "public",
+     "request_id": null,
+     "settlement_id": null,
+     "effective_at": "2026-09-30T19:53:48.283694+00:00",
+     "recorded_at": "2026-09-30T19:53:48.283694+00:00"
+    },
+    {
+     "id": "p_65e0063651e44b3dbbac45f647ce17fe",
+     "seq": 3,
+     "from_user_id": "u_bob",
+     "to_user_id": "u_cy",
+     "amount": 750,
+     "note": "rent",
+     "visibility": "private",
+     "request_id": null,
+     "settlement_id": null,
+     "effective_at": "2026-09-30T19:53:48.284072+00:00",
+     "recorded_at": "2026-09-30T19:53:48.284072+00:00"
+    }
+   ],
+   "requests": [
+    {
+     "id": "rq_116b8c4e1f104a07b242ee6ff2bd0f0d",
+     "seq": 4,
+     "requester_id": "u_bob",
+     "payer_id": "u_ada",
+     "amount": 3000,
+     "note": "dinner",
+     "status": "pending",
+     "payment_id": null,
+     "created_at": "2026-09-30T19:53:48.284384+00:00"
+    },
+    {
+     "id": "rq_9edf968521e74b969b621d61729f89f7",
+     "seq": 6,
+     "requester_id": "u_ada",
+     "payer_id": "u_bob",
+     "amount": 333,
+     "note": "",
+     "status": "pending",
+     "payment_id": null,
+     "created_at": "2026-09-30T19:53:48.284758+00:00"
+    },
+    {
+     "id": "rq_a33455a748e64b1b9235e0fa2f0e4de2",
+     "seq": 7,
+     "requester_id": "u_ada",
+     "payer_id": "u_cy",
+     "amount": 333,
+     "note": "",
+     "status": "pending",
+     "payment_id": null,
+     "created_at": "2026-09-30T19:53:48.284758+00:00"
+    }
+   ],
+   "splits": [
+    {
+     "id": "sp_a34a747547754ae79584773472c4db42",
+     "seq": 5,
+     "caller_id": "u_ada",
+     "amount": 999,
+     "note": "",
+     "participant_handles": [
+      "ada",
+      "bob",
+      "cy"
+     ],
+     "shares": [
+      333,
+      333,
+      333
+     ],
+     "request_ids": [
+      "rq_9edf968521e74b969b621d61729f89f7",
+      "rq_a33455a748e64b1b9235e0fa2f0e4de2"
+     ],
+     "created_at": "2026-09-30T19:53:48.284758+00:00"
+    }
+   ],
+   "settlements": [],
+   "idempotency": [
+    {
+     "user_id": "u_ada",
+     "method": "POST",
+     "path": "/payments",
+     "key": "pay-lost-1",
+     "request_body": {
+      "amount": 2500,
+      "note": "lost response",
+      "to_handle": "bob"
+     },
+     "response_status": 201,
+     "response_body": {
+      "payment_id": "p_a381aae5efdc4dc7838f2f3936959ba7",
+      "from_user_id": "u_ada",
+      "from_handle": "ada",
+      "to_user_id": "u_bob",
+      "to_handle": "bob",
+      "amount": 2500,
+      "currency": "EUR",
+      "note": "lost response",
+      "visibility": "public",
+      "request_id": null,
+      "settlement_id": null,
+      "created_at": "2026-09-30T19:53:48.283292+00:00"
+     }
+    },
+    {
+     "user_id": "u_ada",
+     "method": "POST",
+     "path": "/payments",
+     "key": "pay-ok-2",
+     "request_body": {
+      "amount": 1000,
+      "note": "lunch",
+      "to_handle": "bob"
+     },
+     "response_status": 201,
+     "response_body": {
+      "payment_id": "p_82c656ebc20d493982f0d25bfe187f2c",
+      "from_user_id": "u_ada",
+      "from_handle": "ada",
+      "to_user_id": "u_bob",
+      "to_handle": "bob",
+      "amount": 1000,
+      "currency": "EUR",
+      "note": "lunch",
+      "visibility": "public",
+      "request_id": null,
+      "settlement_id": null,
+      "created_at": "2026-09-30T19:53:48.283694+00:00"
+     }
+    },
+    {
+     "user_id": "u_bob",
+     "method": "POST",
+     "path": "/payments",
+     "key": "pay-ok-3",
+     "request_body": {
+      "amount": 750,
+      "note": "rent",
+      "to_handle": "cy",
+      "visibility": "private"
+     },
+     "response_status": 201,
+     "response_body": {
+      "payment_id": "p_65e0063651e44b3dbbac45f647ce17fe",
+      "from_user_id": "u_bob",
+      "from_handle": "bob",
+      "to_user_id": "u_cy",
+      "to_handle": "cy",
+      "amount": 750,
+      "currency": "EUR",
+      "note": "rent",
+      "visibility": "private",
+      "request_id": null,
+      "settlement_id": null,
+      "created_at": "2026-09-30T19:53:48.284072+00:00"
+     }
+    },
+    {
+     "user_id": "u_bob",
+     "method": "POST",
+     "path": "/requests",
+     "key": "rq-1",
+     "request_body": {
+      "amount": 3000,
+      "note": "dinner",
+      "payer_handle": "ada"
+     },
+     "response_status": 201,
+     "response_body": {
+      "request_id": "rq_116b8c4e1f104a07b242ee6ff2bd0f0d",
+      "requester_id": "u_bob",
+      "requester_handle": "bob",
+      "payer_id": "u_ada",
+      "payer_handle": "ada",
+      "amount": 3000,
+      "currency": "EUR",
+      "note": "dinner",
+      "status": "pending",
+      "payment_id": null,
+      "created_at": "2026-09-30T19:53:48.284384+00:00"
+     }
+    },
+    {
+     "user_id": "u_ada",
+     "method": "POST",
+     "path": "/splits",
+     "key": "sp-1",
+     "request_body": {
+      "amount": 999,
+      "participant_handles": [
+       "ada",
+       "bob",
+       "cy"
+      ]
+     },
+     "response_status": 201,
+     "response_body": {
+      "split_id": "sp_a34a747547754ae79584773472c4db42",
+      "amount": 999,
+      "currency": "EUR",
+      "note": "",
+      "shares": [
+       {
+        "handle": "ada",
+        "amount": 333
+       },
+       {
+        "handle": "bob",
+        "amount": 333
+       },
+       {
+        "handle": "cy",
+        "amount": 333
+       }
+      ],
+      "requests": [
+       {
+        "request_id": "rq_9edf968521e74b969b621d61729f89f7",
+        "requester_id": "u_ada",
+        "requester_handle": "ada",
+        "payer_id": "u_bob",
+        "payer_handle": "bob",
+        "amount": 333,
+        "currency": "EUR",
+        "note": "",
+        "status": "pending",
+        "payment_id": null,
+        "created_at": "2026-09-30T19:53:48.284758+00:00"
+       },
+       {
+        "request_id": "rq_a33455a748e64b1b9235e0fa2f0e4de2",
+        "requester_id": "u_ada",
+        "requester_handle": "ada",
+        "payer_id": "u_cy",
+        "payer_handle": "cy",
+        "amount": 333,
+        "currency": "EUR",
+        "note": "",
+        "status": "pending",
+        "payment_id": null,
+        "created_at": "2026-09-30T19:53:48.284758+00:00"
+       }
+      ],
+      "created_at": "2026-09-30T19:53:48.284758+00:00"
+     }
+    }
+   ]
+  }
+ },
+ "tokens": {
+  "ada": "32j6xsyIfnoBihprMZiys0gAXlWwntl-yH1l_ZeY1vI",
+  "bob": "qgZVskHorIfCzaabYVQ7iO4kUz6FkEJpfWWGq17NWPs",
+  "cy": "opvf9Rag6AC0GpvhQ39TTFwDvBeE5JQJ8_MdJMU7a48"
+ },
+ "lost_payment": {
+  "key": "pay-lost-1",
+  "body": {
+   "to_handle": "bob",
+   "amount": 2500,
+   "note": "lost response"
+  },
+  "payment_id": "p_a381aae5efdc4dc7838f2f3936959ba7"
+ },
+ "pending_request_id": "rq_116b8c4e1f104a07b242ee6ff2bd0f0d"
+}
