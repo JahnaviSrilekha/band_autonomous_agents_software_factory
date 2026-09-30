@@ -63,6 +63,7 @@ _add_auth_routes()
 
 
 def _add_wallet_routes():
+    from .handlers.activity import list_activity
     from .handlers.payments import create_payment
     from .handlers.requests import (
         cancel_request, create_request, decline_request, list_requests, pay_request,
@@ -74,6 +75,7 @@ def _add_wallet_routes():
     ROUTES.append(Route("POST", r"^/requests/(?P<id>[^/]+)/decline$", decline_request, auth=True))
     ROUTES.append(Route("POST", r"^/requests/(?P<id>[^/]+)/cancel$", cancel_request, auth=True))
     ROUTES.append(Route("GET", r"^/requests$", list_requests, auth=True))
+    ROUTES.append(Route("GET", r"^/activity$", list_activity, auth=True))
 
 
 _add_wallet_routes()

@@ -114,6 +114,21 @@ class TestSignup(unittest.TestCase):
         user = state_module.STATE.users[payload["user_id"]]
         self.assertEqual(user.balance, 0)
         self.assertEqual(state_module.STATE.handles["cy"], payload["user_id"])
+        ada = base.request(self.port, "POST", "/auth/login", body={
+            "email": "ada@example.com", "password": "correct horse",
+        })[1]
+        status, payment, _ = base.request(self.port, "POST", "/payments", body={
+            "to_handle": "cy", "amount": 250,
+        }, headers={**{"Authorization": f"Bearer {ada['token']}"}, "Idempotency-Key": "first-pay"})
+        self.assertEqual(status, 201)
+        status, me, _ = base.request(self.port, "GET", "/me", headers={
+            "Authorization": f"Bearer {payload['token']}",
+        })
+        self.assertEqual(me["balance"], 250)
+        status, req, _ = base.request(self.port, "POST", "/requests", body={
+            "payer_handle": "cy", "amount": 10,
+        }, headers={"Authorization": f"Bearer {ada['token']}", "Idempotency-Key": "first-req"})
+        self.assertEqual(status, 201, "new user can also be asked for money immediately")
 
     def test_signup_tokens_work(self):
         status, payload, _ = signup(self.port, {

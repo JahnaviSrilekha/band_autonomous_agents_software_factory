@@ -26,11 +26,11 @@ files live under `stage-1/src/pocketful/`. Status starts `pending`; developer fl
 | id | reqs | files | deps | done test | status | batch |
 |---|---|---|---|---|---|---|
 | T8 | R4,R22,R38,R56,R57,R58,R59,R18,R30 | `src/pocketful/handlers/payments.py` | T4,T7 | Full case table from R57; atomic debit/credit (no partial state on failure); note round-trips unicode/emoji byte-for-byte; conservation holds after N concurrent payments (sum unchanged); money never created/destroyed — no path other than debit+credit between existing wallets changes a balance (R4); amount/note/visibility type overrides are 422 not 400 (R38) | pending | 3 |
-| T9 | R23,R24,R25,R60,R61,R62 | `src/pocketful/handlers/requests.py` (create) | T7 | Case table from R61; over-balance request created as `pending`, no balance check | pending | 3 |
-| T10 | R63,R64,R65,R66 | `src/pocketful/handlers/requests.py` (pay) | T8,T9 | Case table from R65; pay body defaults + strict body-equality on replay (R63); replay-after-paid returns 200 original payment, no `409 request_not_pending` | pending | 3 |
-| T11 | R67,R68 | `src/pocketful/handlers/requests.py` (decline/cancel) | T9 | Decline/cancel happy path, repeat-of-same-terminal-state → 200, wrong-party → 403, wrong-status → 409 | pending | 3 |
-| T12 | R69,R70 | `src/pocketful/handlers/requests.py` (list) | T9,T10,T11 | `direction`/`status`/`limit`/`offset` filter matrix; `has_more` correctness; invalid query values → 422 (R39) | pending | 3 |
-| T13 | R26,R27,R28,R29,R75 | `src/pocketful/handlers/activity.py` | T8,T10 | Feed-visibility matrix (sender/receiver/public/private/third-party) exactly matches R26/R29; requests and splits never appear | pending | 3 |
+| T9 | R23,R24,R25,R60,R61,R62 | `src/pocketful/handlers/requests.py` (create) | T7 | Case table from R61; over-balance request created as `pending`, no balance check | done | 3 |
+| T10 | R63,R64,R65,R66 | `src/pocketful/handlers/requests.py` (pay) | T8,T9 | Case table from R65; pay body defaults + strict body-equality on replay (R63); replay-after-paid returns 200 original payment, no `409 request_not_pending` | done | 3 |
+| T11 | R67,R68 | `src/pocketful/handlers/requests.py` (decline/cancel) | T9 | Decline/cancel happy path, repeat-of-same-terminal-state → 200, wrong-party → 403, wrong-status → 409 | done | 3 |
+| T12 | R69,R70 | `src/pocketful/handlers/requests.py` (list) | T9,T10,T11 | `direction`/`status`/`limit`/`offset` filter matrix; `has_more` correctness; invalid query values → 422 (R39) | done | 3 |
+| T13 | R26,R27,R28,R29,R75 | `src/pocketful/handlers/activity.py` | T8,T10 | Feed-visibility matrix (sender/receiver/public/private/third-party) exactly matches R26/R29; requests and splits never appear | done | 3 |
 
 ## Batch 4 — splits and settlements
 
