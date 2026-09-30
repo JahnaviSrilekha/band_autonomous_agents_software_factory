@@ -18,8 +18,8 @@ files live under `stage-1/src/pocketful/`. Status starts `pending`; developer fl
 | id | reqs | files | deps | done test | status | batch |
 |---|---|---|---|---|---|---|
 | T5 | R19,R20,R21,R43,R44,R47 | `src/pocketful/auth.py` (signup) | T3 | Signup happy path → 201 shape; email taken → 409; short password → 422; bad email format → 422; derived-handle collision → 409 `handle_taken`, no user created; stored password is a scrypt hash, not plaintext; new user's balance is 0 and can immediately receive a payment/request (R21) | pending | 2 |
-| T6 | R43,R44,R46 | `src/pocketful/auth.py` (login) | T5 | Login happy path → 200 same shape as signup; wrong password/unknown email → 401; two logins for same user → two independently valid tokens | pending | 2 |
-| T7 | R45,R55 | `src/pocketful/middleware.py`, `src/pocketful/handlers/me.py` | T6 | `GET /me` with valid token → exact shape; missing/garbage/unknown token → 401 on `/me` and on a write endpoint stub | pending | 2 |
+| T6 | R43,R44,R46 | `src/pocketful/auth.py` (login) | T5 | Login happy path → 200 same shape as signup; wrong password/unknown email → 401; two logins for same user → two independently valid tokens | done | 2 |
+| T7 | R45,R55 | `src/pocketful/middleware.py`, `src/pocketful/handlers/me.py` | T6 | `GET /me` with valid token → exact shape; missing/garbage/unknown token → 401 on `/me` and on a write endpoint stub | done | 2 |
 
 ## Batch 3 — payments and requests
 
