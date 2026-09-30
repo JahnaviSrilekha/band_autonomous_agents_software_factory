@@ -46,7 +46,7 @@ files live under `stage-1/src/pocketful/`. Status starts `pending`; developer fl
 |---|---|---|---|---|---|---|
 | T17 | R78,R81 | `src/pocketful/handlers/export_import.py` (export) | T3..T16 | Export returns `track`,`format_version:1`,`state`; snapshot is atomic (concurrent write during export does not torn-read) | done | 5 |
 | T18 | R78,R79,R80,R82,R83,R84,R85 | `src/pocketful/handlers/export_import.py` (import) | T17 | Export→import round trip is a behavioral no-op; invalid JSON → 400; wrong track/version/invalid state → 422, no change; old token still authenticates post-import; a completed idempotency key still replays; a previously-4xx-failed key is still a fresh first-use post-import | done | 5 |
-| T19 | R1,R2,R3,R41,R42,R10 | (no new files — hardening pass across all handlers) | T1..T18 | `python -m harness run --track pocketful --stage 1` (host mode) green; then `--mode isolated` green, ending `claimed stage: 1` with the stage-2 overshoot line `fail`; a manual ≥50-concurrent-request burst against `/payments`/`/settlements` shows no negative balance, conservation holds, no 5xx | in_progress | 5 |
+| T19 | R1,R2,R3,R41,R42,R10 | (no new files — hardening pass across all handlers) | T1..T18 | `python -m harness run --track pocketful --stage 1` (host mode) green; then `--mode isolated` green, ending `claimed stage: 1` with the stage-2 overshoot line `fail`; a manual ≥50-concurrent-request burst against `/payments`/`/settlements` shows no negative balance, conservation holds, no 5xx | done | 5 |
 
 ## Coverage
 
