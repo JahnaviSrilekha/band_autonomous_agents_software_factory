@@ -111,6 +111,26 @@ class TestIdempotencyChokepoint(unittest.TestCase):
         self.assertEqual(status, 201)
         self.assertEqual(len(route2.calls), 1)
 
+    def test_unexpected_exception_frees_key_for_reexecution(self):
+        class ExplodingRoute:
+            def __init__(self):
+                self.calls = 0
+
+            def handler(self, user, body, params, query):
+                self.calls += 1
+                if self.calls == 1:
+                    raise RuntimeError("unexpected internal failure")
+                return 201, {"ok": True}
+
+        route = ExplodingRoute()
+        with self.assertRaises(RuntimeError):
+            self.run_route(route, {"amount": 5})
+        self.assertEqual(route.calls, 1)
+        status, payload = self.run_route(route, {"amount": 5})
+        self.assertEqual(status, 201, "key must not be stuck in_flight after a non-ApiError failure")
+        self.assertEqual(payload, {"ok": True})
+        self.assertEqual(route.calls, 2)
+
     def test_different_path_same_key_is_independent(self):
         first = FakeRoute(None)
         second = FakeRoute(None)
