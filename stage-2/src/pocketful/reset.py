@@ -4,7 +4,8 @@ import re
 from .errors import ApiError
 from . import state as state_module
 from .state import (
-    STATE_LOCK, Payment, Request, State, User, hash_password,
+    AUTHORIZATION_STATUSES, STATE_LOCK, Authorization, Payment, Request, State, User,
+    hash_password, parse_rfc3339,
 )
 
 HANDLE_RE = re.compile(r"^[a-z0-9_]{1,20}$")
@@ -43,11 +44,98 @@ def _fixture_visibility(entry):
     return visibility
 
 
+def _fixture_ttl(fixture):
+    value = fixture.get("authorization_ttl_seconds", 600)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ApiError(422, "validation_failed",
+                       "authorization_ttl_seconds must be a positive integer number of seconds")
+    if isinstance(value, float) and (not math.isfinite(value) or not value.is_integer()):
+        raise ApiError(422, "validation_failed",
+                       "authorization_ttl_seconds must be a positive integer number of seconds")
+    ttl = int(value)
+    if ttl < 1:
+        raise ApiError(422, "validation_failed",
+                       "authorization_ttl_seconds must be a positive integer number of seconds")
+    return ttl
+
+
+def _seed_authorizations(state, fixture):
+    authorizations = fixture.get("authorizations", [])
+    if not isinstance(authorizations, list):
+        raise ApiError(422, "validation_failed", "authorizations must be an array")
+    stamp = state_module.now_iso()
+    for entry in authorizations:
+        if not isinstance(entry, dict):
+            raise ApiError(422, "validation_failed", "each seeded authorization must be an object")
+        authorization_id = _fixture_string(entry, "id")
+        from_user_id = _fixture_string(entry, "from_user_id")
+        to_user_id = _fixture_string(entry, "to_user_id")
+        if from_user_id not in state.users or to_user_id not in state.users:
+            raise ApiError(422, "validation_failed", "seeded authorization references an unknown user")
+        if authorization_id in state.authorizations:
+            raise ApiError(422, "validation_failed", "duplicate authorization id")
+        amount = _fixture_amount(entry.get("amount"), 0, "seeded authorization amount")
+        status = entry.get("status", "open")
+        if status not in AUTHORIZATION_STATUSES:
+            raise ApiError(422, "validation_failed",
+                           'seeded authorization status must be open, captured, voided or expired')
+        expires_at = entry.get("expires_at")
+        expires_dt = parse_rfc3339(expires_at, "seeded authorization expires_at")
+        captured_amount = entry.get("captured_amount")
+        if captured_amount is None:
+            captured_amount = amount if status == "captured" else 0
+        else:
+            if isinstance(captured_amount, bool) or not isinstance(captured_amount, int):
+                raise ApiError(422, "validation_failed",
+                               "seeded authorization captured_amount must be an integer")
+            if captured_amount < 0 or captured_amount > amount:
+                raise ApiError(422, "validation_failed",
+                               "seeded authorization captured_amount must be between 0 and amount")
+        payment_ids = entry.get("payment_ids", [])
+        if not isinstance(payment_ids, list) or not all(isinstance(p, str) for p in payment_ids):
+            raise ApiError(422, "validation_failed",
+                           "seeded authorization payment_ids must be an array of strings")
+        created_at = entry.get("created_at", stamp)
+        if not isinstance(created_at, str):
+            raise ApiError(422, "validation_failed", "created_at must be a string")
+        authorization = Authorization(
+            id=authorization_id,
+            from_user_id=from_user_id,
+            to_user_id=to_user_id,
+            amount=amount,
+            note=_fixture_note(entry),
+            visibility=_fixture_visibility(entry),
+            status=status,
+            captured_amount=captured_amount,
+            payment_ids=list(payment_ids),
+            created_at=created_at,
+            expires_at=expires_at,
+            expires_dt=expires_dt,
+        )
+        state.authorizations[authorization_id] = authorization
+
+
+def _check_hold_sum(state):
+    now = state_module.now_dt()
+    for user_id in state.users:
+        holds = 0
+        for auth in state.authorizations.values():
+            if (auth.from_user_id == user_id and auth.status == "open"
+                    and auth.expires_dt > now):
+                holds += auth.amount - auth.captured_amount
+        if state.users[user_id].balance - holds < 0:
+            raise ApiError(422, "validation_failed",
+                           "seeded open holds exceed the user's balance")
+
+
 def build_state_from_fixture(fixture):
     state = _build_users(fixture)
+    state.authorization_ttl_seconds = _fixture_ttl(fixture)
     _seed_payments(state, fixture)
     _seed_requests(state, fixture)
     _seed_operators(state, fixture)
+    _seed_authorizations(state, fixture)
+    _check_hold_sum(state)
     return state
 
 

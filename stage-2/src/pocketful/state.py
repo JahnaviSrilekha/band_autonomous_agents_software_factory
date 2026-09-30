@@ -16,6 +16,25 @@ def now_iso():
     return datetime.now(timezone.utc).isoformat()
 
 
+def now_dt():
+    return datetime.now(timezone.utc)
+
+
+def parse_rfc3339(value, what="timestamp"):
+    from .errors import ApiError
+
+    if not isinstance(value, str) or not value:
+        raise ApiError(422, "validation_failed", f"{what} must be an RFC 3339 timestamp string")
+    text = value[:-1] + "+00:00" if value.endswith(("Z", "z")) else value
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        raise ApiError(422, "validation_failed", f"{what} must be an RFC 3339 timestamp")
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
 def new_id(prefix):
     return f"{prefix}_{uuid.uuid4().hex}"
 
@@ -60,7 +79,8 @@ class User:
 
 class Payment:
     def __init__(self, id, from_user_id, to_user_id, amount, note, visibility,
-                 request_id, settlement_id, effective_at, recorded_at, seq):
+                 request_id, settlement_id, effective_at, recorded_at, seq,
+                 authorization_id=None):
         self.id = id
         self.from_user_id = from_user_id
         self.to_user_id = to_user_id
@@ -72,6 +92,7 @@ class Payment:
         self.effective_at = effective_at
         self.recorded_at = recorded_at
         self.seq = seq
+        self.authorization_id = authorization_id
 
 
 class Request:
@@ -125,10 +146,51 @@ class IdempotencyRecord:
         self.response_body = response_body
 
 
+AUTHORIZATION_STATUSES = ("open", "captured", "voided", "expired")
+
+
+class Authorization:
+    def __init__(self, id, from_user_id, to_user_id, amount, note, visibility, status,
+                 captured_amount, payment_ids, created_at, expires_at, expires_dt):
+        self.id = id
+        self.from_user_id = from_user_id
+        self.to_user_id = to_user_id
+        self.amount = amount
+        self.note = note
+        self.visibility = visibility
+        self.status = status
+        self.captured_amount = captured_amount
+        self.payment_ids = payment_ids
+        self.created_at = created_at
+        self.expires_at = expires_at
+        self.expires_dt = expires_dt
+
+
+def is_live_hold(auth, now):
+    return auth.status == "open" and auth.expires_dt > now
+
+
+def effective_status(auth, now):
+    if auth.status == "open" and auth.expires_dt <= now:
+        return "expired"
+    return auth.status
+
+
+def held(state, user_id, now):
+    return sum(a.amount - a.captured_amount
+               for a in state.authorizations.values()
+               if a.from_user_id == user_id and is_live_hold(a, now))
+
+
+def available(state, user_id, now):
+    return state.users[user_id].balance - held(state, user_id, now)
+
+
 class State:
     def __init__(self):
         self.currency = "EUR"
         self.minor_units = 2
+        self.authorization_ttl_seconds = 600
         self.settlement_operator_ids = set()
         self.users = {}
         self.handles = {}
@@ -138,6 +200,7 @@ class State:
         self.requests = {}
         self.splits = {}
         self.settlements = {}
+        self.authorizations = {}
         self.idempotency = {}
         self.seq = 0
 

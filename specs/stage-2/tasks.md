@@ -11,7 +11,7 @@ individually.
 
 | id | reqs | files | deps | done test | status | batch |
 |---|---|---|---|---|---|---|
-| T20 | R130,R131,R132,R133,R134,R135,R136,R137 | `src/pocketful/state.py`, `src/pocketful/reset.py` | T3 | `POST /_test/reset` with the stage-2 example fixture (incl. `authorization_ttl_seconds`, `authorizations`) → 204; omitted fixture fields default per R131/R135; seeded unexpired open holds summing above a user's balance → 422, state unchanged (R133); non-positive/non-integer `authorization_ttl_seconds` → 422; a stage-1-shaped fixture (no `authorizations` key) still resets cleanly | pending | 1 |
+| T20 | R130,R131,R132,R133,R134,R135,R136,R137 | `src/pocketful/state.py`, `src/pocketful/reset.py` | T3 | `POST /_test/reset` with the stage-2 example fixture (incl. `authorization_ttl_seconds`, `authorizations`) → 204; omitted fixture fields default per R131/R135; seeded unexpired open holds summing above a user's balance → 422, state unchanged (R133); non-positive/non-integer `authorization_ttl_seconds` → 422; a stage-1-shaped fixture (no `authorizations` key) still resets cleanly | done | 1 |
 | T21 | R138,R121,R122,design.md§9 | `src/pocketful/state.py` (`is_live_hold`/`held`/`available`), `src/pocketful/handlers/me.py` | T20 | `GET /me` returns `balance,total,available,held` exactly per R138; with zero open holds `balance==total==available` and `held==0`; a seeded open hold reduces `available` immediately after reset with no API call in between (R156); a clock-expired (but stored-`open`) hold contributes 0 to `held` | pending | 1 |
 
 ## Batch 2 — authorization endpoints, existing-endpoint funds-check update
