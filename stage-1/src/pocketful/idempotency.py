@@ -61,7 +61,7 @@ def run_idempotent(route, user, method, path, headers, body, params, query):
         state.idempotency[record_key] = record
         try:
             status, payload = route.handler(user, body, params, query)
-        except ApiError:
+        except Exception:
             del state.idempotency[record_key]
             raise
         record.status = "done"
