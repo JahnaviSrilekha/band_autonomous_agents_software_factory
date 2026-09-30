@@ -12,6 +12,7 @@ individually.
 | id | reqs | files | deps | done test | status | batch |
 |---|---|---|---|---|---|---|
 | T20 | R130,R131,R132,R133,R134,R135,R136,R137 | `src/pocketful/state.py`, `src/pocketful/reset.py` | T3 | `POST /_test/reset` with the stage-2 example fixture (incl. `authorization_ttl_seconds`, `authorizations`) → 204; omitted fixture fields default per R131/R135; seeded unexpired open holds summing above a user's balance → 422, state unchanged (R133); non-positive/non-integer `authorization_ttl_seconds` → 422; a stage-1-shaped fixture (no `authorizations` key) still resets cleanly | done | 1 |
+| T37 | A22 | `src/pocketful/reset.py` | T20 | Tester finding (suite commit `8471751`+): a seeded `status:"expired"` authorization whose `expires_at` is in the *future* → 422 `validation_failed`, state unchanged (A22a — currently wrongly accepted, 204); a seeded authorization with `from_user_id == to_user_id`, or either id unknown → 422, state unchanged (A22c — currently wrongly accepted). A seeded `status:"expired"` with `expires_at` ≤ reset time still accepts normally (stored as `"open"`, per A22a's non-contradictory case — already correct, don't regress it). A seeded `captured`/`voided` record without `captured_amount`/payment linkage still defaults `captured_amount:0`,`payment_ids:[]` (A22b — already correct per tester, not retested here) | pending | 1 |
 | T21 | R138,R121,R122,design.md§9 | `src/pocketful/state.py` (`is_live_hold`/`held`/`available`), `src/pocketful/handlers/me.py` | T20 | `GET /me` returns `balance,total,available,held` exactly per R138; with zero open holds `balance==total==available` and `held==0`; a seeded open hold reduces `available` immediately after reset with no API call in between (R156); a clock-expired (but stored-`open`) hold contributes 0 to `held` | done | 1 |
 
 ## Batch 2 — authorization endpoints, existing-endpoint funds-check update
@@ -58,3 +59,9 @@ mechanically testable; the remaining descriptive language is satisfied by review
 read, per A17. Stage-1 requirements R1-R93 remain covered by T1-T19 (carried forward,
 `done`, unmodified in `stage-2/` except where T26/T27 explicitly touch shared files —
 those tasks' done-tests re-run the relevant stage-1 case tables to confirm no regression).
+
+**T37** (added after batch-1 merge, tester's acceptance-suite run against `main@2db982d`):
+A22's contradictory-seed validation rules were not fully covered by T20's landed
+implementation — see T37's row above. Small, scoped fix to the same file T20 already
+owns; not a new requirement, just closing a gap between A22 (recorded in amend-1) and
+T20's original acceptance criteria (written before amend-1 existed).
