@@ -99,10 +99,11 @@ Kind values: behaviour, error, limit, concurrency, retry, time, compatibility, i
   the API. With `minor_units: 2`, `15.00` and `15` both submit `1500`; `15.5` submits `1550`.
   Nonnumeric input or more than `minor_units` decimal places must show the form's error
   element without sending a request. For example, `15.005` is rejected rather than rounded."
-  — Acceptance: `pay-amount`/`request-amount`/`split-amount`/`authorize-amount` all follow
-  this rule; a value with excess decimal places or non-numeric characters blocks submission
-  client-side and shows the screen's error testid, with zero HTTP requests sent for that
-  attempt.
+  — Acceptance: `pay-amount`/`request-amount`/`split-amount`/`authorize-amount`/
+  `authorization-capture-amount-{id}` all follow this rule; a value with excess decimal
+  places or non-numeric characters blocks submission client-side and shows the screen's
+  error testid (`authorization-error` for the capture-amount input) with zero HTTP requests
+  sent for that attempt.
 
 ## Activity feed — `/`
 
@@ -299,7 +300,7 @@ Kind values: behaviour, error, limit, concurrency, retry, time, compatibility, i
   `balance` is a reset error: `422 validation_failed` from `POST /_test/reset`, changing
   nothing, exactly like a negative seeded balance." — Acceptance: such a fixture is rejected
   422, and `POST /_test/reset` leaves prior state completely untouched (same rule as
-  stage-1 R15/R17 negative-balance handling).
+  stage-1 R15/A13 negative-balance handling).
 - **R134** (interface). "Seeded `status` is `open`, `captured`, `voided` or `expired`. Only
   `open` holds anything." — Acceptance: seeded `captured`/`voided`/`expired` authorizations
   contribute nothing to `held`; only `open` (and unexpired, per R136) ones do.
@@ -396,9 +397,10 @@ Kind values: behaviour, error, limit, concurrency, retry, time, compatibility, i
   remaining (not the original `amount`); a `final:false` capture of the exact remainder
   closes the authorization (status becomes `captured`); void/expiry on a partially-captured
   authorization releases only what remains held, leaving `captured_amount`/`payment_ids`
-  intact; `remaining_amount`/`final`/`payment_ids` participate in the response shape but the
-  idempotency body-equality check (stage-1 §7) still compares only the *request* body, so
-  these new *response* fields never affect replay matching.
+  intact; `remaining_amount` and `payment_ids` participate in the response shape (the source
+  does not require echoing `final` itself in any response — see A23); the idempotency
+  body-equality check (stage-1 §7) still compares only the *request* body, so these new
+  *response* fields never affect replay matching regardless.
 - **R147** (error). Case table: authorization not `open` → 409 `authorization_not_open`;
   `expires_at` at or before now → 409 `authorization_expired`; `amount` above the
   authorisation's uncaptured remainder → 422 `capture_exceeds_authorization`; `amount` below
@@ -433,7 +435,8 @@ Kind values: behaviour, error, limit, concurrency, retry, time, compatibility, i
   "`limit`, `offset` and `has_more` behave exactly as on `GET /requests`." — Acceptance:
   same pagination/filter semantics as stage-1 R69/R70 (defaults, ranges, `has_more`,
   invalid-value 422), applied to the authorization list and its `direction`/`status`
-  vocabulary.
+  vocabulary; response envelope and item shape per A21 (source states filters/pagination
+  but not the response body itself).
 - **R151** (time, behaviour). "An authorisation expired by the clock matches `expired`, never
   `open`." — Acceptance: `?status=open` never returns a clock-expired authorization even if
   its stored status field is still `"open"`; `?status=expired` does return it.
@@ -529,7 +532,13 @@ Kind values: behaviour, error, limit, concurrency, retry, time, compatibility, i
   raw values for integration testing (R96) and are not rendered to the user as text.
   Reasoning: R96 explicitly requires exposing ids/handles/statuses in `data-testid`/`data-*`
   attributes for every screen; reading R98 to forbid that would directly contradict R96, so
-  the conservative resolution scopes R98 to visible text only.
+  the conservative resolution scopes R98 to visible text only. This same scoping excludes
+  `authorization-expires-{id}` from R98's "timestamps for people first" clause: R155
+  explicitly requires that element's *text* to be "the RFC 3339 `expires_at`" verbatim, a
+  specific per-element rule that overrides R98's general preference for that one element
+  only (every other displayed timestamp still follows R98's people-first formatting).
+  Reasoning: the same specific-overrides-general pattern already used throughout this
+  document (e.g. R57/A2's endpoint-specific field rules over the general error table).
 - **A19**. `pay-uncertain` (named only in R113's prose, with no table row elsewhere in
   stage-2.md) is a required `data-testid` element on `/`, governed by the same
   presence/text rules as the screen's other conditional-error elements (`pay-error`): absent
@@ -544,3 +553,63 @@ Kind values: behaviour, error, limit, concurrency, retry, time, compatibility, i
   not a second, conflicting one — R153 merely confirms that adding `wallet-available`/
   `wallet-held` does not change `wallet-balance`'s pre-existing meaning. Reasoning: stated
   explicitly by "retaining the existing display."
+- **A21**. `GET /authorizations`'s response is `{"authorizations": [...], "has_more": bool}`;
+  each item is exactly the authorization representation used elsewhere (R139's `POST
+  /authorizations` 201 shape plus R146's `captured_amount`/`remaining_amount`/`payment_id`/
+  `payment_ids`) — the same "one representation, used everywhere" principle stage-1 R56
+  already established for payments. Reasoning: the source states R150's filters/pagination
+  but never an explicit response envelope; the closest sibling endpoint, `GET /requests`
+  (stage-1 R69), uses the `{"<plural>": [...], "has_more": bool}` envelope with its
+  create-response item shape reused verbatim, and stage-2.md gives no indication
+  `GET /authorizations` deviates from that established pattern.
+- **A22**. Seeded authorizations: (a) a seeded `status: "expired"` record is accepted and
+  stored internally as `"open"` (design.md §3 — `"expired"` is never a stored value) only
+  when its `expires_at` is at or before reset time; a seeded `"expired"` record whose
+  `expires_at` is in the future is a contradictory fixture value and a reset error (`422
+  validation_failed`, changing nothing — same family as R133); (b) a seeded `"captured"` or
+  `"voided"` record not supplying `captured_amount`/a capture-payment defaults to
+  `captured_amount: 0`, `payment_ids: []` (the fixture format has no field to supply either,
+  same gap A12 already accepts for stage-1 seeded request statuses); (c) a seeded
+  authorization with `from_user_id == to_user_id`, or referencing an unknown user id, is a
+  reset error (`422 validation_failed`, changing nothing — same one-code-for-fixture-shape-
+  defects pattern as A13). Reasoning: each case mirrors an existing stage-1/stage-2
+  assumption's conservative pattern for a fixture value the spec's example doesn't cover,
+  applied here for consistency rather than inventing a new error code or silently accepting
+  an internally-contradictory or dangling-reference fixture.
+- **A23**. `POST /authorizations/{id}/capture`'s response does not echo the request's
+  `final` field — only `remaining_amount` and `payment_ids` are new response fields (R146).
+  Reasoning: the source states "Every authorization response adds `remaining_amount`" and
+  separately establishes `payment_ids`, but at no point shows or requires `final` appearing
+  in any response body; `final` is a request-only field, like `amount` on the same endpoint
+  is present in the request but not echoed back under its request name.
+- **A24**. `final` supplied with a non-boolean JSON type (e.g. `"final": "yes"`) on
+  `POST /authorizations/{id}/capture` is `400 malformed_request`, not `422
+  validation_failed`. Reasoning: stage-2.md states no endpoint-specific override for
+  `final`'s type (unlike `amount`, which has an explicit 422 case), so it falls to the
+  general stage-1 §5/R40 rule: a field of the wrong JSON type with no endpoint-specific
+  override is 400, not 422 — the same general-rule fallback A9 already applies to
+  settlement-entry field types.
+- **A25**. The `authorize-*` form (`authorize-handle`/`amount`/`note`/`visibility`/`submit`,
+  `authorize-error`) is rendered on `/authorizations`, alongside `authorization-list`, not
+  on `/`. Reasoning: the source's "## UI" section introduces "a new route
+  `/authorizations`" immediately before tabling the authorize-form and list testids
+  together, and explicitly scopes `authorization-list` to that route ("Container on
+  `/authorizations`"); nothing in R94's original route table (which predates authorizations
+  entirely) claims the form for `/`, so the more specific, later section's framing governs.
+- **A26**. `logout-button` is visible on every authenticated screen (`/`, `/requests`,
+  `/split`, `/authorizations`), the same presence rule R100 states explicitly for
+  `current-user`/`current-handle`. Reasoning: R100 tables `logout-button` alongside those
+  two elements without repeating "visible on every screen when signed in" verbatim, but a
+  signed-in user needs a way to sign out from any screen they can reach; reading the
+  omission as "logout-button exists on only one unspecified screen" would leave no stated
+  screen for it at all, which is not a coherent reading of a "must" requirement.
+- **A27**. `POST /authorizations`'s worked example, where the 201 body shows
+  `"expires_at": "2026-09-24T13:10:00+00:00"` equal to `"created_at"` of the same value, is
+  an abbreviated/illustrative example and does not override the normative sentence
+  immediately following it, "`expires_at` is `created_at` plus
+  `authorization_ttl_seconds`" (R139) — `expires_at` is always strictly
+  `created_at + authorization_ttl_seconds`, never equal to `created_at` unless the service's
+  TTL were (invalidly) zero. Reasoning: stated normative rules govern over examples
+  throughout this document (e.g. stage-1's rounding table is normative while endpoint JSON
+  samples elsewhere are illustrative); an example that contradicts an adjacent explicit
+  formula is the example's abbreviation, not a second rule.
