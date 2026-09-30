@@ -1,0 +1,244 @@
+"""Shared HTTP client and helpers for the pocketful stage-1 acceptance suite.
+
+Black-box only: talks to the running service over HTTP, per the stage-1 spec.
+Stdlib only. Per-request timeout 5s, 10s for /_test/* endpoints (R10).
+"""
+import json
+import re
+import threading
+import urllib.parse
+from http.client import HTTPConnection
+
+REQUEST_TIMEOUT = 5.0
+TEST_TIMEOUT = 10.0
+
+RFC3339 = re.compile(
+    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?([+-]\d{2}:\d{2}|Z)$"
+)
+
+PASSWORD = "correct horse"
+
+
+class SuiteFailure(AssertionError):
+    pass
+
+
+def check(cond, msg):
+    if not cond:
+        raise SuiteFailure(msg)
+
+
+def eq(actual, expected, msg):
+    check(actual == expected, f"{msg}: expected {expected!r}, got {actual!r}")
+
+
+def expect_error(resp, status, code):
+    """Assert a 4xx body conforms to R35 and carries the specified code."""
+    check(
+        status <= 499,
+        f"expect_error: non-4xx status requested ({status})",
+    )
+    if resp.status != status:
+        raise SuiteFailure(
+            f"expected HTTP {status} {code}, got {resp.status}: {resp.raw[:300]!r}"
+        )
+    check(
+        "application/json" in resp.content_type,
+        f"{status} response content-type not JSON: {resp.content_type!r}",
+    )
+    body = resp.json()
+    check(isinstance(body, dict) and "error" in body, f"error body shape: {body!r}")
+    check(
+        set(body.keys()) == {"error"},
+        f"error body has unexpected top-level keys: {sorted(body.keys())}",
+    )
+    err = body["error"]
+    check(isinstance(err, dict), f"error member not an object: {err!r}")
+    eq(err.get("code"), code, "error code")
+    check(
+        isinstance(err.get("message"), str) and err.get("message"),
+        f"error.message must be a non-empty string: {err!r}",
+    )
+
+
+def expect_ok(resp, status, what="response"):
+    if resp.status != status:
+        raise SuiteFailure(f"expected {status} for {what}, got {resp.status}: {resp.raw[:300]!r}")
+    return resp.json()
+
+
+class Response:
+    def __init__(self, status, headers, raw):
+        self.status = status
+        self.headers = {k.lower(): v for k, v in headers}
+        self.raw = raw
+
+    @property
+    def content_type(self):
+        return self.headers.get("content-type", "")
+
+    def json(self):
+        try:
+            return json.loads(self.raw.decode("utf-8"))
+        except Exception:
+            raise SuiteFailure(
+                f"body is not valid JSON (status {self.status}): {self.raw[:300]!r}"
+            )
+
+
+class Client:
+    def __init__(self, base):
+        u = urllib.parse.urlparse(base if "://" in base else "http://" + base)
+        check(u.scheme == "http", f"unsupported base URL scheme: {base!r}")
+        self.host = u.hostname or "127.0.0.1"
+        self.port = u.port or 80
+        self.prefix = (u.path or "").rstrip("/")
+
+    def request(self, method, path, body=None, *, token=None, headers=None,
+                raw_body=None, timeout=REQUEST_TIMEOUT):
+        conn = HTTPConnection(self.host, self.port, timeout=timeout)
+        hdrs = dict(headers or {})
+        if token:
+            hdrs["Authorization"] = f"Bearer {token}"
+        payload = None
+        if raw_body is not None:
+            payload = raw_body.encode("utf-8") if isinstance(raw_body, str) else raw_body
+            hdrs.setdefault("Content-Type", "application/json; charset=utf-8")
+        elif body is not None:
+            payload = json.dumps(body).encode("utf-8")
+            hdrs.setdefault("Content-Type", "application/json; charset=utf-8")
+        try:
+            conn.request(method, self.prefix + path, body=payload, headers=hdrs)
+            resp = conn.getresponse()
+            data = resp.read()
+            return Response(resp.status, resp.getheaders(), data)
+        except Exception as e:
+            raise SuiteFailure(f"{method} {path} transport error: {e!r}")
+        finally:
+            conn.close()
+
+    def get(self, path, **kw):
+        return self.request("GET", path, **kw)
+
+    def post(self, path, body=None, **kw):
+        return self.request("POST", path, body=body, **kw)
+
+    # -- test-control endpoints (10s timeout, R10) --
+
+    def reset(self, fixture_body):
+        return self.request("POST", "/_test/reset", body=fixture_body, timeout=TEST_TIMEOUT)
+
+    def export(self):
+        return self.get("/_test/export", timeout=TEST_TIMEOUT)
+
+    def import_state(self, obj):
+        return self.request("POST", "/_test/import", body=obj, timeout=TEST_TIMEOUT)
+
+    # -- auth --
+
+    def signup(self, email, password=PASSWORD, display_name="Ada"):
+        return self.post("/auth/signup", body={
+            "email": email, "password": password, "display_name": display_name,
+        })
+
+    def login(self, email, password=PASSWORD):
+        return self.post("/auth/login", body={"email": email, "password": password})
+
+    def token_for(self, handle):
+        r = self.login(f"{handle}@example.com")
+        return expect_ok(r, 200, f"login {handle}").get("token")
+
+
+# -- fixtures --
+
+def fuser(uid, handle, balance, email=None, password=PASSWORD):
+    return {
+        "id": uid, "email": email or f"{handle}@example.com", "password": password,
+        "display_name": handle.capitalize(), "handle": handle, "balance": balance,
+    }
+
+
+def fixture(users=None, payments=None, requests=None, currency="EUR",
+            minor_units=2, operators=None, extra=None):
+    f = {
+        "currency": currency,
+        "minor_units": minor_units,
+        "users": users if users is not None else [],
+        "payments": payments if payments is not None else [],
+        "requests": requests if requests is not None else [],
+    }
+    if operators is not None:
+        f["settlement_operator_ids"] = operators
+    if extra:
+        f.update(extra)
+    return f
+
+
+STANDARD_USERS = [
+    fuser("u_ada", "ada", 100000),
+    fuser("u_bob", "bob", 50000),
+    fuser("u_cy", "cy", 0),
+]
+
+OPERATOR_USERS = STANDARD_USERS + [fuser("u_op", "op", 10000)]
+
+
+def fresh(c, operator=False, users=None, operators=None, **kw):
+    """Reset to the standard fixture; return {handle: token} for seeded users."""
+    if users is None:
+        users = OPERATOR_USERS if operator else STANDARD_USERS
+    if operator and operators is None:
+        operators = ["u_op"]
+    r = c.reset(fixture(users=users, operators=operators, **kw))
+    check(r.status == 204, f"reset failed: HTTP {r.status}: {r.raw[:300]!r}")
+    handles = [u["handle"] for u in users]
+    return {h: c.token_for(h) for h in handles}
+
+
+def payment_body(to_handle, amount, note=None, visibility=None, extra=None):
+    b = {"to_handle": to_handle, "amount": amount}
+    if note is not None:
+        b["note"] = note
+    if visibility is not None:
+        b["visibility"] = visibility
+    if extra:
+        b.update(extra)
+    return b
+
+
+def make_payment(c, token, to_handle, amount, key, note=None, visibility=None, **kw):
+    return c.post("/payments", body=payment_body(to_handle, amount, note, visibility, **kw),
+                  token=token, headers={"Idempotency-Key": key})
+
+
+def get_me(c, token):
+    return expect_ok(c.get("/me", token=token), 200, "GET /me")
+
+
+def balances_sum(c, tokens):
+    return sum(get_me(c, t)["balance"] for t in tokens.values())
+
+
+# -- concurrency --
+
+def run_concurrently(fns):
+    """Run callables on parallel threads; return their results in order.
+    Raises the first exception/error response encountered."""
+    results = [None] * len(fns)
+    errors = [None] * len(fns)
+
+    def wrap(i, fn):
+        try:
+            results[i] = fn()
+        except BaseException as e:  # noqa: BLE001 - collected below
+            errors[i] = e
+
+    threads = [threading.Thread(target=wrap, args=(i, fn)) for i, fn in enumerate(fns)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    for e in errors:
+        if e is not None:
+            raise e
+    return results
