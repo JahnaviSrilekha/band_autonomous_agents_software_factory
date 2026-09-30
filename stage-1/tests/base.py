@@ -11,6 +11,7 @@ from pocketful import server as server_module
 
 
 def reset_state():
+    from pocketful import state as state_module
     from pocketful.state import State
 
     state_module.STATE = State()
