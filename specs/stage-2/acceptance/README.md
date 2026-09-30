@@ -20,9 +20,13 @@ started container.
 By default the suite first re-runs the stage-1 acceptance modules
 (`specs/stage-1/acceptance/test_*.py`, unmodified) against this service —
 stage-1 requirements remain in force by reference, so a stage-2 regression of
-any stage-1 flow fails here. As of this commit all 94 stage-1 regression tests
-pass against `stage-2/`'s carried-forward service; the stage-2 tests are red
-until the stage-2 implementation lands (T20-T33).
+any stage-1 flow fails here. Latest evidence (branch `tester-stage2`,
+commit `bff735b`, against main `2db982d` with T20/T21 merged): stage-1
+regression 94/94 PASS; stage-2 13/83 PASS — the T20/T21 behaviours (fixture
+seeding/validation, `GET /me` holds) are green, and the failures are the
+not-yet-implemented T22-T33 endpoints/routes plus one genuine finding
+(A22's contradictory-seed reset validation currently accepts a
+contradictory fixture — `test_a22_contradictory_seeds_rejected`).
 
 ## Coverage
 
