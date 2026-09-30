@@ -106,7 +106,7 @@ class TestActivity(unittest.TestCase):
             self.assertEqual(set(p.keys()), {
                 "payment_id", "from_user_id", "from_handle", "to_user_id", "to_handle",
                 "amount", "currency", "note", "visibility", "request_id", "settlement_id",
-                "created_at",
+                "authorization_id", "created_at",
             })
 
     def test_requires_auth(self):
