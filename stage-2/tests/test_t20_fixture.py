@@ -150,7 +150,7 @@ class TestT20Fixture(unittest.TestCase):
         self.assertEqual(effective_status(state.authorizations["a_voided"], now), "voided")
         self.assertEqual(effective_status(state.authorizations["a_expired"], now), "expired")
 
-    def test_seeded_captured_defaults_captured_amount_to_full(self):
+    def test_seeded_captured_defaults_captured_amount_to_zero(self):
         fixture = copy.deepcopy(FIXTURE)
         fixture["authorizations"] = [
             {"id": "a_c", "from_user_id": "u_ada", "to_user_id": "u_bob",
@@ -159,7 +159,36 @@ class TestT20Fixture(unittest.TestCase):
         status, _, _ = base.request(self.port, "POST", "/_test/reset", body=fixture)
         self.assertEqual(status, 204)
         auth = state_module.STATE.authorizations["a_c"]
-        self.assertEqual(auth.captured_amount, 1000)
+        self.assertEqual(auth.captured_amount, 0)
+        self.assertEqual(auth.payment_ids, [])
+
+    def test_seeded_expired_with_future_expires_422(self):
+        fixture = copy.deepcopy(FIXTURE)
+        fixture["authorizations"][0]["status"] = "expired"
+        fixture["authorizations"][0]["expires_at"] = _future()
+        before = state_module.STATE
+        status, payload, _ = base.request(self.port, "POST", "/_test/reset", body=fixture)
+        self.assertEqual(status, 422)
+        self.assertEqual(payload["error"]["code"], "validation_failed")
+        self.assertIs(state_module.STATE, before)
+
+    def test_seeded_expired_with_past_expires_stored_open_computes_expired(self):
+        fixture = copy.deepcopy(FIXTURE)
+        fixture["authorizations"][0]["status"] = "expired"
+        fixture["authorizations"][0]["expires_at"] = _past()
+        status, _, _ = base.request(self.port, "POST", "/_test/reset", body=fixture)
+        self.assertEqual(status, 204)
+        auth = state_module.STATE.authorizations["a_1"]
+        self.assertEqual(auth.status, "open")
+        from pocketful.state import effective_status
+        self.assertEqual(effective_status(auth, state_module.now_dt()), "expired")
+
+    def test_seeded_from_equals_to_422(self):
+        fixture = copy.deepcopy(FIXTURE)
+        fixture["authorizations"][0]["to_user_id"] = "u_ada"
+        status, payload, _ = base.request(self.port, "POST", "/_test/reset", body=fixture)
+        self.assertEqual(status, 422)
+        self.assertEqual(payload["error"]["code"], "validation_failed")
 
     def test_unknown_user_in_seeded_authorization_422(self):
         fixture = copy.deepcopy(FIXTURE)

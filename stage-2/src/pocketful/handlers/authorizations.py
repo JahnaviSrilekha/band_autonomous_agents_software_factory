@@ -26,6 +26,7 @@ def authorization_json(state, auth, now):
         "status": effective_status(auth, now),
         "expires_at": auth.expires_at,
         "payment_id": auth.payment_ids[-1] if auth.payment_ids else None,
+        "payment_ids": list(auth.payment_ids),
         "created_at": auth.created_at,
         "remaining_amount": remaining_amount(auth, now),
     }
@@ -91,7 +92,7 @@ def capture_authorization(user, body, params, query):
             amount = None
         final = body.get("final", True)
         if not isinstance(final, bool):
-            raise ApiError(422, "validation_failed", "final must be a boolean")
+            raise ApiError(400, "malformed_request", "final must be a boolean")
         remaining = remaining_amount(authorization, now)
         if amount is None:
             amount = remaining

@@ -119,11 +119,12 @@ class TestT25ListAuthorizations(unittest.TestCase):
         record = payload["authorizations"][0]
         for field in ("authorization_id", "from_user_id", "from_handle", "to_user_id",
                       "to_handle", "amount", "captured_amount", "currency", "note",
-                      "visibility", "status", "expires_at", "payment_id", "created_at",
-                      "remaining_amount"):
+                      "visibility", "status", "expires_at", "payment_id", "payment_ids",
+                      "created_at", "remaining_amount"):
             self.assertIn(field, record)
         self.assertEqual(record["status"], "open")
         self.assertEqual(record["remaining_amount"], record["amount"])
+        self.assertEqual(record["payment_ids"], [])
 
 
 if __name__ == "__main__":

@@ -64,6 +64,7 @@ def _seed_authorizations(state, fixture):
     if not isinstance(authorizations, list):
         raise ApiError(422, "validation_failed", "authorizations must be an array")
     stamp = state_module.now_iso()
+    reset_now = state_module.now_dt()
     for entry in authorizations:
         if not isinstance(entry, dict):
             raise ApiError(422, "validation_failed", "each seeded authorization must be an object")
@@ -72,6 +73,9 @@ def _seed_authorizations(state, fixture):
         to_user_id = _fixture_string(entry, "to_user_id")
         if from_user_id not in state.users or to_user_id not in state.users:
             raise ApiError(422, "validation_failed", "seeded authorization references an unknown user")
+        if from_user_id == to_user_id:
+            raise ApiError(422, "validation_failed",
+                           "seeded authorization cannot be from and to the same user")
         if authorization_id in state.authorizations:
             raise ApiError(422, "validation_failed", "duplicate authorization id")
         amount = _fixture_amount(entry.get("amount"), 0, "seeded authorization amount")
@@ -81,9 +85,14 @@ def _seed_authorizations(state, fixture):
                            'seeded authorization status must be open, captured, voided or expired')
         expires_at = entry.get("expires_at")
         expires_dt = parse_rfc3339(expires_at, "seeded authorization expires_at")
+        if status == "expired":
+            if expires_dt > reset_now:
+                raise ApiError(422, "validation_failed",
+                               'seeded "expired" authorization must have expires_at at or before now')
+            status = "open"
         captured_amount = entry.get("captured_amount")
         if captured_amount is None:
-            captured_amount = amount if status == "captured" else 0
+            captured_amount = 0
         else:
             if isinstance(captured_amount, bool) or not isinstance(captured_amount, int):
                 raise ApiError(422, "validation_failed",

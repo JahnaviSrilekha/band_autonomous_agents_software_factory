@@ -205,7 +205,7 @@ class TestT23Capture(unittest.TestCase):
                          (422, "capture_exceeds_authorization"))
         status, payload, _ = self._capture(auth_id, {"amount": 1500, "final": "yes"},
                                            key="k-finalbad")
-        self.assertEqual((status, payload["error"]["code"]), (422, "validation_failed"))
+        self.assertEqual((status, payload["error"]["code"]), (400, "malformed_request"))
         status, payload, _ = base.request(self.port, "POST", f"/authorizations/{auth_id}/capture",
                                           body={"amount": 100},
                                           headers={**self.ada, "Idempotency-Key": "k-payer"})
