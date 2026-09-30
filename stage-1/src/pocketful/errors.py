@@ -83,11 +83,15 @@ def parse_limit_offset(query):
     return limit, offset
 
 
-def _query_single(query, name):
+def query_value(query, name):
     values = query.get(name)
     if not values:
         return None
     return values[0]
+
+
+def _query_single(query, name):
+    return query_value(query, name)
 
 
 def _is_decimal_digits(value):
