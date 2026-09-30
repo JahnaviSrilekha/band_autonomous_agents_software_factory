@@ -207,7 +207,8 @@ class TestBearerMiddleware(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(me, {
             "user_id": "u_ada", "display_name": "Ada", "handle": "ada",
-            "balance": 10000, "currency": "EUR", "minor_units": 2,
+            "balance": 10000, "total": 10000, "available": 10000, "held": 0,
+            "currency": "EUR", "minor_units": 2,
         })
 
     def test_missing_garbage_unknown_token_401(self):
