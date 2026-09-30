@@ -64,10 +64,11 @@ _add_auth_routes()
 
 def _add_wallet_routes():
     from .handlers.payments import create_payment
-    from .handlers.requests import create_request
+    from .handlers.requests import create_request, pay_request
 
     ROUTES.append(Route("POST", r"^/payments$", create_payment, auth=True, idem=True))
     ROUTES.append(Route("POST", r"^/requests$", create_request, auth=True, idem=True))
+    ROUTES.append(Route("POST", r"^/requests/(?P<id>[^/]+)/pay$", pay_request, auth=True, idem=True))
 
 
 _add_wallet_routes()
