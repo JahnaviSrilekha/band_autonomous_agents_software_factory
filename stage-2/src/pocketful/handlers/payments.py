@@ -16,12 +16,13 @@ def payment_json(state, payment):
         "visibility": payment.visibility,
         "request_id": payment.request_id,
         "settlement_id": payment.settlement_id,
+        "authorization_id": payment.authorization_id,
         "created_at": payment.effective_at,
     }
 
 
 def move_money(state, from_user, to_user, amount, note, visibility, request_id=None,
-               settlement_id=None, created_at=None):
+               settlement_id=None, created_at=None, authorization_id=None):
     stamp = created_at or state_module.now_iso()
     from_user.balance -= amount
     to_user.balance += amount
@@ -37,6 +38,7 @@ def move_money(state, from_user, to_user, amount, note, visibility, request_id=N
         effective_at=stamp,
         recorded_at=stamp,
         seq=state.next_seq(),
+        authorization_id=authorization_id,
     )
     state.payments.append(payment)
     return payment
@@ -57,7 +59,8 @@ def create_payment(user, body, params, query):
         to_user = state.users[state.handles[to_handle]]
         if to_user.id == fresh.id:
             raise ApiError(422, "self_payment", "cannot pay yourself")
-        if fresh.balance < amount:
-            raise ApiError(409, "insufficient_funds", "balance is below amount")
+        now = state_module.now_dt()
+        if state_module.available(state, fresh.id, now) < amount:
+            raise ApiError(409, "insufficient_funds", "available funds are below amount")
         payment = move_money(state, fresh, to_user, amount, note, visibility)
         return 201, payment_json(state, payment)

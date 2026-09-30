@@ -88,6 +88,23 @@ def _add_wallet_routes():
 _add_wallet_routes()
 
 
+def _add_authorization_routes():
+    from .handlers.authorizations import (
+        capture_authorization, create_authorization, list_authorizations,
+        void_authorization,
+    )
+
+    ROUTES.append(Route("POST", r"^/authorizations$", create_authorization, auth=True, idem=True))
+    ROUTES.append(Route("GET", r"^/authorizations$", list_authorizations, auth=True))
+    ROUTES.append(Route("POST", r"^/authorizations/(?P<id>[^/]+)/capture$", capture_authorization,
+                        auth=True, idem=True))
+    ROUTES.append(Route("POST", r"^/authorizations/(?P<id>[^/]+)/void$", void_authorization,
+                        auth=True))
+
+
+_add_authorization_routes()
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "Pocketful/1"
     protocol_version = "HTTP/1.1"

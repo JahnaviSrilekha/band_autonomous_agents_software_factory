@@ -44,8 +44,9 @@ def create_settlement(user, body, params, query):
         for from_user_id, to_user_id, amount, _note, _visibility in parsed:
             deltas[from_user_id] = deltas.get(from_user_id, 0) - amount
             deltas[to_user_id] = deltas.get(to_user_id, 0) + amount
+        now = state_module.now_dt()
         for user_id, delta in deltas.items():
-            if state.users[user_id].balance + delta < 0:
+            if state.users[user_id].balance + delta - state_module.held(state, user_id, now) < 0:
                 raise ApiError(409, "insufficient_funds", "settlement is not collectively affordable")
         stamp = state_module.now_iso()
         settlement_id = new_id("st")

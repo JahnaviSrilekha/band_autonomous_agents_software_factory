@@ -151,7 +151,8 @@ AUTHORIZATION_STATUSES = ("open", "captured", "voided", "expired")
 
 class Authorization:
     def __init__(self, id, from_user_id, to_user_id, amount, note, visibility, status,
-                 captured_amount, payment_ids, created_at, expires_at, expires_dt):
+                 captured_amount, payment_ids, created_at, expires_at, expires_dt,
+                 created_dt=None, seq=0):
         self.id = id
         self.from_user_id = from_user_id
         self.to_user_id = to_user_id
@@ -162,8 +163,10 @@ class Authorization:
         self.captured_amount = captured_amount
         self.payment_ids = payment_ids
         self.created_at = created_at
+        self.created_dt = created_dt if created_dt is not None else parse_rfc3339(created_at, "created_at")
         self.expires_at = expires_at
         self.expires_dt = expires_dt
+        self.seq = seq
 
 
 def is_live_hold(auth, now):
@@ -174,6 +177,12 @@ def effective_status(auth, now):
     if auth.status == "open" and auth.expires_dt <= now:
         return "expired"
     return auth.status
+
+
+def remaining_amount(auth, now):
+    if not is_live_hold(auth, now):
+        return 0
+    return auth.amount - auth.captured_amount
 
 
 def held(state, user_id, now):

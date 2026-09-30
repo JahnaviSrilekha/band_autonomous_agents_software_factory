@@ -67,8 +67,9 @@ def pay_request(user, body, params, query):
             raise ApiError(403, "forbidden", "only the payer may pay this request")
         if request.status != "pending":
             raise ApiError(409, "request_not_pending", "request is not pending")
-        if fresh.balance < request.amount:
-            raise ApiError(409, "insufficient_funds", "balance is below amount")
+        now = state_module.now_dt()
+        if state_module.available(state, fresh.id, now) < request.amount:
+            raise ApiError(409, "insufficient_funds", "available funds are below amount")
         requester = state.users[request.requester_id]
         from .payments import move_money, payment_json
 
