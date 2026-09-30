@@ -6,6 +6,8 @@ document order. Lookup helpers are by data-testid or testid prefix.
 """
 from html.parser import HTMLParser
 
+from client import SuiteFailure, check, eq
+
 VOID = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link",
         "meta", "param", "source", "track", "wbr"}
 
@@ -15,13 +17,13 @@ class Element:
         self.tag = tag
         self.attrs = dict(attrs)
         self.parent = parent
-        self.children = []
-        self._text_parts = []
+        self.children = []  # Element and str nodes, in document order
         self.order = 0
 
     def text(self):
-        """Concatenated descendant text, outer whitespace stripped, internal
-        whitespace runs collapsed to single spaces (R103 'text is exactly')."""
+        """Concatenated descendant text in document order, outer whitespace
+        stripped, internal whitespace runs collapsed to single spaces (R103
+        'text is exactly')."""
         parts = []
 
         def walk(el):
@@ -29,7 +31,7 @@ class Element:
                 if isinstance(ch, str):
                     parts.append(ch)
                 else:
-                    walk(ch)
+                    parts.append(ch.text())
         walk(self)
         return " ".join("".join(parts).split())
 
@@ -93,32 +95,10 @@ class _Parser(HTMLParser):
 
     def handle_data(self, data):
         if data:
-            self.stack[-1]._text_parts.append(data)
+            self.stack[-1].children.append(data)
 
     def close(self):
         super().close()
-        # push collected text parts down: each element owns its direct text
-        def assign(el):
-            for ch in el.children:
-                if isinstance(ch, Element):
-                    assign(ch)
-            direct = el._text_parts
-            el._text_parts = []
-            for ch in el.children:
-                if isinstance(ch, str):
-                    continue
-            # direct text lives on the element itself
-            el._direct_text = direct
-        assign(self.root)
-
-        def collect(el):
-            text = list(getattr(el, "_direct_text", []))
-            for ch in el.children:
-                if isinstance(ch, Element):
-                    text.extend(collect(ch))
-            el._text_parts = text
-            return text
-        collect(self.root)
 
 
 def parse(html):
