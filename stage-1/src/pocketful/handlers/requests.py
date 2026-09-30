@@ -1,4 +1,7 @@
-from ..errors import ApiError, parse_amount, parse_note, parse_visibility, require_string
+from ..errors import (
+    ApiError, parse_amount, parse_limit_offset, parse_note, parse_visibility, query_value,
+    require_string,
+)
 from .. import state as state_module
 from ..state import STATE_LOCK, Request, new_id
 
@@ -112,3 +115,32 @@ def cancel_request(user, body, params, query):
             raise ApiError(409, "request_not_pending", "request is not pending")
         request.status = "cancelled"
         return 200, request_json(state, request)
+
+
+def list_requests(user, body, params, query):
+    with STATE_LOCK:
+        state = state_module.STATE
+        fresh = state.users.get(user.id)
+        if fresh is None:
+            raise ApiError(401, "unauthenticated", "session no longer valid")
+        direction = query_value(query, "direction")
+        status = query_value(query, "status")
+        limit, offset = parse_limit_offset(query)
+        if direction is not None and direction not in ("incoming", "outgoing"):
+            raise ApiError(422, "validation_failed", "direction must be incoming or outgoing")
+        if status is not None and status not in REQUEST_STATUSES:
+            raise ApiError(422, "validation_failed", "unknown status value")
+        items = [r for r in state.requests.values()
+                 if r.requester_id == fresh.id or r.payer_id == fresh.id]
+        if direction == "incoming":
+            items = [r for r in items if r.payer_id == fresh.id]
+        elif direction == "outgoing":
+            items = [r for r in items if r.requester_id == fresh.id]
+        if status is not None:
+            items = [r for r in items if r.status == status]
+        items.sort(key=lambda r: (r.created_at, r.seq), reverse=True)
+        page = items[offset:offset + limit]
+        return 200, {
+            "requests": [request_json(state, r) for r in page],
+            "has_more": len(items) > offset + limit,
+        }
