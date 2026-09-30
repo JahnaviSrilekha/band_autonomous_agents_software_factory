@@ -42,33 +42,24 @@ def _add_reset_route():
 _add_reset_route()
 
 
-def _authenticate(headers):
-    from . import state as state_module
-
-    header = headers.get("Authorization")
-    if not header:
-        raise ApiError(401, "unauthenticated", "bearer token required")
-    parts = header.split(None, 1)
-    if len(parts) != 2 or parts[0].lower() != "bearer":
-        raise ApiError(401, "unauthenticated", "malformed authorization header")
-    token = parts[1].strip()
-    if not token:
-        raise ApiError(401, "unauthenticated", "missing bearer token")
-    state = state_module.STATE
-    with state_module.STATE_LOCK:
-        user_id = state.tokens.get(token)
-        user = state.users.get(user_id) if user_id is not None else None
-    if user is None:
-        raise ApiError(401, "unauthenticated", "unknown bearer token")
-    return user
-
-
 def _check_operator(user):
     from . import state as state_module
 
     with state_module.STATE_LOCK:
         if user.id not in state_module.STATE.settlement_operator_ids:
             raise ApiError(403, "forbidden", "operator permission required")
+
+
+def _add_auth_routes():
+    from .auth import login, signup
+    from .handlers.me import get_me
+
+    ROUTES.append(Route("POST", r"^/auth/signup$", signup))
+    ROUTES.append(Route("POST", r"^/auth/login$", login))
+    ROUTES.append(Route("GET", r"^/me$", get_me, auth=True))
+
+
+_add_auth_routes()
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -145,7 +136,9 @@ class Handler(BaseHTTPRequestHandler):
             body = parse_json_body(self._read_body())
         user = None
         if route.auth:
-            user = _authenticate(self.headers)
+            from .middleware import authenticate
+
+            user = authenticate(self.headers)
         if route.operator:
             _check_operator(user)
         if route.idem:
