@@ -61,6 +61,25 @@ def get_statement(user, body, params, query):
         fresh = state.users.get(user.id)
         if fresh is None:
             raise ApiError(401, "unauthenticated", "session no longer valid")
+        snapshot_token = query_value(query, "snapshot")
+        if snapshot_token is not None:
+            if (query_value(query, "from") is not None
+                    or query_value(query, "to") is not None
+                    or query_value(query, "known_at") is not None):
+                raise ApiError(422, "validation_failed",
+                               "snapshot paging accepts only limit and offset")
+            limit, offset = parse_limit_offset(query)
+            stored = state.statement_snapshots.get(snapshot_token)
+            if (stored is None or stored["owner_user_id"] != fresh.id
+                    or stored["reset_epoch"] != state.reset_epoch):
+                raise ApiError(404, "not_found", "no such snapshot")
+            page, has_more = _paged(stored["entries"], limit, offset)
+            return 200, {
+                "opening_balance": stored["opening_balance"],
+                "entries": page,
+                "closing_balance": stored["closing_balance"],
+                "has_more": has_more,
+            }
         from_dt = _instant_param(query, "from")
         to_dt = _instant_param(query, "to")
         known_at = _instant_param(query, "known_at")
@@ -68,10 +87,20 @@ def get_statement(user, body, params, query):
         now = state_module.now_dt()
         to = to_dt if to_dt is not None else now
         opening, closing, entries = build_statement(state, fresh.id, from_dt, to, known_at)
+        token = state_module.new_id("snap")
+        state.statement_snapshots[token] = {
+            "owner_user_id": fresh.id,
+            "reset_epoch": state.reset_epoch,
+            "opening_balance": opening,
+            "closing_balance": closing,
+            "entries": entries,
+            "resolved_to": to.isoformat(),
+        }
         page, has_more = _paged(entries, limit, offset)
         return 200, {
             "opening_balance": opening,
             "entries": page,
             "closing_balance": closing,
             "has_more": has_more,
+            "snapshot": token,
         }

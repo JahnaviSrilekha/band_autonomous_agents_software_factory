@@ -55,7 +55,8 @@ class TestT45Statement(unittest.TestCase):
         status, payload, _ = self.stmt()
         self.assertEqual(status, 200)
         self.assertEqual(set(payload.keys()), {"opening_balance", "entries",
-                                               "closing_balance", "has_more"})
+                                               "closing_balance", "has_more",
+                                               "snapshot"})
         self.assertEqual(payload["opening_balance"], 11800)
         self.assertEqual(payload["closing_balance"], 10000)
         self.assertEqual(payload["has_more"], False)
