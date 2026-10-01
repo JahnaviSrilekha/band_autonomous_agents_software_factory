@@ -24,8 +24,9 @@ def seeded_batch_state(c, n=3, base=100):
 def test_r269_auth_operator_key_order(c):
     toks = fresh(c, operator=True)
     body = {"corrections": [batch_item("p1", 1, 50, T1)]}
-    # (a) no token -> 401 before everything (even with a bad body).
-    expect_error(c.post("/correction-batches", raw_body="{not json"), 401,
+    # (a) no token -> 401 before 403/400-key (R269/A46). (An unparseable body
+    # is 400 malformed_request earlier per stage-1 R54's parse-first order.)
+    expect_error(c.post("/correction-batches", body={"corrections": []}), 401,
                  "unauthenticated", "no token -> 401 (R269/A46)")
     # (b) authenticated non-operator -> 403 before the key check.
     expect_error(c.post("/correction-batches", body=body, token=toks["ada"]),
@@ -65,6 +66,7 @@ def test_r270_bounds_and_distinct_ids(c):
 
 
 def test_r271_item_field_validation_in_input_order(c):
+    from client import rfc3339
     toks, ids = seeded_batch_state(c, n=4)
     ok_item = batch_item("p1", 1, 111, T1)
     cases = [
@@ -74,7 +76,7 @@ def test_r271_item_field_validation_in_input_order(c):
         (batch_item("p1", 1, 1000000001, T1), 422, "validation_failed", "amount too big"),
         (batch_item("p1", 1, 100, T1, reason=""), 422, "validation_failed", "empty reason"),
         (batch_item("p1", 1, 100, T1, reason="x" * 201), 422, "validation_failed", "long reason"),
-        (batch_item("p1", 1, 100, shift(T1, 10)), 422, "validation_failed", "future effective_at"),
+        (batch_item("p1", 1, 100, rfc3339(60)), 422, "validation_failed", "future effective_at"),
         (batch_item("p1", 1, 100, "not-a-time"), 422, "validation_failed", "bad instant"),
         ({"payment_id": "p1", "amount": 100, "effective_at": T1, "reason": "r"},
          422, "validation_failed", "missing expected_revision"),
@@ -297,26 +299,33 @@ def test_r278_combined_effect_not_sequential(c):
 
 def test_r275_historical_overdraft_combined_boundaries(c):
     """Each item alone is fine at every boundary; the combined timeline
-    overdrafts between T2.5 and T3 -> 409 historical_overdraft (R275/A45)."""
+    overdrafts between T2+1us and T3 -> 409 historical_overdraft (R275/A45)."""
+    from client import fuser
+    users = [fuser("u_ada", "ada", 150), fuser("u_bob", "bob", 50000),
+             fuser("u_cy", "cy", 1000), fuser("u_op", "op", 10000)]
     seeded = [
         fpayment("p0", "u_bob", "u_ada", 100, created_at=T1),
         fpayment("p1", "u_ada", "u_bob", 1, created_at=T2),
         fpayment("p2", "u_ada", "u_cy", 1, created_at=shift(T2, 1)),
         fpayment("p3", "u_cy", "u_ada", 1, created_at=T3),
     ]
-    toks = fresh(c, operator=True, payments=seeded)
+    toks = fresh(c, operator=True, users=users, operators=["u_op"],
+                 payments=seeded)
     # Sanity: each item alone succeeds.
     expect_ok(correction_batch(c, toks["op"], "b-h-a",
                                [batch_item("p1", 1, 81, T2)]), 201)
-    toks2 = fresh(c, operator=True, payments=seeded)
+    toks2 = fresh(c, operator=True, users=users, operators=["u_op"],
+                  payments=seeded)
     expect_ok(correction_batch(c, toks2["op"], "b-h-b",
                                [batch_item("p2", 1, 81, shift(T2, 1))]), 201)
-    toks3 = fresh(c, operator=True, payments=seeded)
+    toks3 = fresh(c, operator=True, users=users, operators=["u_op"],
+                  payments=seeded)
     expect_ok(correction_batch(c, toks3["op"], "b-h-c",
                                [batch_item("p3", 1, 61, T3)]), 201)
     # Combined: ada's timeline: T1 +100; T2 -80 (p1 1->81); T2+1us -80
     # (p2 1->81) -> -60 < 0 at that boundary; T3 +60 (p3 1->61) -> 0 now.
-    toks4 = fresh(c, operator=True, payments=seeded)
+    toks4 = fresh(c, operator=True, users=users, operators=["u_op"],
+                  payments=seeded)
     expect_error(correction_batch(c, toks4["op"], "b-h-all",
                                   [batch_item("p1", 1, 81, T2),
                                    batch_item("p2", 1, 81, shift(T2, 1)),
@@ -348,7 +357,9 @@ def test_r275_historical_overdraft_combined_boundaries(c):
                   payments=poor)
     expect_ok(correction_batch(c, toks7["op"], "b-cur-b",
                                [batch_item("p2", 1, 200, shift(T2, 1))]), 201)
-    expect_error(correction_batch(c, toks5["op"], "b-h-cur",
+    toks8 = fresh(c, operator=True, users=users, operators=["u_op"],
+                  payments=poor)
+    expect_error(correction_batch(c, toks8["op"], "b-h-cur",
                                   [batch_item("p1", 1, 200, T2),
                                    batch_item("p2", 1, 200, shift(T2, 1))]),
                  409, "insufficient_funds",
@@ -425,7 +436,7 @@ def test_r282_effective_at_not_future(c):
 
 
 def test_r283_original_payments_and_receipts_unchanged(c):
-    toks, ids = seeded_batch_state(c, n=1)
+    toks, ids = seeded_batch_state(c, n=2)
     original_rev1 = revisions_of(c, toks["ada"], "p1")[0]
     before_entries = statement_ok(c, toks["ada"])["entries"]
     r = expect_ok(correction_batch(c, toks["op"], "b-orig",
@@ -440,8 +451,12 @@ def test_r283_original_payments_and_receipts_unchanged(c):
     eq(len(p1_entries), 1, "exactly one entry per payment (stage-3 R219)")
     eq(p1_entries[0]["revision"], 2, "entry now shows the batch revision")
     eq(p1_entries[0]["delta"], -555, "entry delta is the corrected amount (R217)")
-    others = [e for e in entries if e["payment"]["payment_id"] != "p1"]
-    eq(others, before_entries, "other payments' entries untouched (R283)")
+    # p2's entry content is untouched (its running balance_after legitimately
+    # reflects p1's correction; the entry's own payment/delta/revision do not).
+    before_p2 = [e for e in before_entries if e["payment"]["payment_id"] == "p2"][0]
+    after_p2 = [e for e in entries if e["payment"]["payment_id"] == "p2"][0]
+    for key in ("payment", "delta", "revision", "effective_at", "recorded_at"):
+        eq(after_p2[key], before_p2[key], f"p2 entry {key} untouched (R283)")
 
 
 def test_r284_original_retries_return_original_bodies(c):

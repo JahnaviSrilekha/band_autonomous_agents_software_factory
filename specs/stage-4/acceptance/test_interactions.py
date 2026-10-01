@@ -160,10 +160,17 @@ def test_r288_concurrent_corrections_same_revision(c):
     loser = next(r for r in responses2 if r.status >= 400)
     eq(loser.status, 409, "loser gets 409")
     eq(loser.json()["error"]["code"], "stale_revision", "loser code stale_revision")
-    # The losing batch left its OTHER item untouched too (all-or-nothing).
-    eq([rev["revision"] for rev in revisions_of(c, toks2["op"], "p2")], [1],
-       "rejected batch applied nothing (R279/R288)")
-    eq(len(revisions_of(c, toks2["op"], "p1")), 2, "winner applied once")
+    # Exactly the winner's effects are present — the loser's are fully absent
+    # (all-or-nothing for a rejected batch, R279/R288).
+    batch_won = winners[0].json().get("correction_batch_id") is not None
+    p1_revs = [rev["revision"] for rev in revisions_of(c, toks2["ada"], "p1")]
+    p2_revs = [rev["revision"] for rev in revisions_of(c, toks2["ada"], "p2")]
+    if batch_won:
+        eq(p1_revs, [1, 2], "batch applied its p1 revision once")
+        eq(p2_revs, [1, 2], "batch applied its p2 revision once")
+    else:
+        eq(p1_revs, [1, 2], "single correction applied once")
+        eq(p2_revs, [1], "rejected batch applied nothing to its other item (R279/R288)")
 
 
 def expect_ok_shape_409(r):

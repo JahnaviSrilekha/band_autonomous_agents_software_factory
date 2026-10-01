@@ -133,7 +133,10 @@ def test_r267_floor_applies_after_multiple_refunds(c):
                  422, "refund_exceeds_payment", "floor is the cumulative sum 500")
     expect_ok(correct(c, toks["ada"], p["payment_id"], "c-y",
                       correction_body(1, 500, p["created_at"], "floor")), 201)
-    # And now the remaining refund headroom follows the corrected amount.
-    expect_ok(refund(c, toks["bob"], p["payment_id"], "rf-c", refund_body(500)), 201)
+    # Refund headroom follows the corrected amount: 500 already refunded of a
+    # now-500 payment, so any further refund is over the cap.
+    expect_error(refund(c, toks["bob"], p["payment_id"], "rf-c", refund_body(500)),
+                 422, "refund_exceeds_payment",
+                 "headroom exhausted after floor correction (R267/R259)")
     expect_error(refund(c, toks["bob"], p["payment_id"], "rf-d", refund_body(1)),
                  422, "refund_exceeds_payment", "refunded out after floor correction")
