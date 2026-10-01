@@ -168,6 +168,80 @@ class TestT41Funds(unittest.TestCase):
         payment = next(p for p in state_module.STATE.payments if p.id == self.payment_id)
         self.assertEqual(len(payment.revisions), 6)
 
+    def test_exactly_once_identical_concurrent_corrections_with_conservation(self):
+        fixture = {
+            "currency": "EUR", "minor_units": 2,
+            "users": [
+                {"id": "u_ada", "email": "ada@example.com", "password": "correct horse",
+                 "display_name": "Ada", "handle": "ada", "balance": 9300},
+                {"id": "u_bob", "email": "bob@example.com", "password": "correct horse",
+                 "display_name": "Bob", "handle": "bob", "balance": 10100},
+                {"id": "u_cy", "email": "cy@example.com", "password": "correct horse",
+                 "display_name": "Cy", "handle": "cy", "balance": 600},
+            ],
+            "payments": [
+                {"id": "p_s1", "from_user_id": "u_ada", "to_user_id": "u_bob",
+                 "amount": 500, "created_at": "2026-09-01T10:00:00+00:00"},
+                {"id": "p_s2", "from_user_id": "u_bob", "to_user_id": "u_cy",
+                 "amount": 300, "visibility": "private",
+                 "created_at": "2026-09-01T11:00:00+00:00"},
+                {"id": "p_s3", "from_user_id": "u_ada", "to_user_id": "u_cy",
+                 "amount": 200, "created_at": "2026-09-01T11:00:00+00:00"},
+                {"id": "p_s4", "from_user_id": "u_bob", "to_user_id": "u_cy",
+                 "amount": 100, "created_at": "2026-09-01T12:00:00+00:00"},
+            ],
+        }
+        status, _, _ = base.request(self.port, "POST", "/_test/reset", body=fixture)
+        self.assertEqual(status, 204)
+        state = state_module.STATE
+        self.assertEqual(state.users["u_ada"].balance, 9300)
+        self.assertEqual(state.users["u_ada"].opening_balance, 10000)
+        ada = login(self.port, "ada@example.com")
+        status, payload, _ = base.request(self.port, "POST", "/payments", body={
+            "to_handle": "bob", "amount": 500},
+            headers={**ada, "Idempotency-Key": "k-once-pay"})
+        self.assertEqual(status, 201)
+        self.assertEqual(state.users["u_ada"].balance, 8800)
+        payment_id = payload["payment_id"]
+        barrier = threading.Barrier(8)
+        statuses = []
+
+        created_at = payload["created_at"]
+
+        def attempt():
+            try:
+                barrier.wait()
+                status, _payload, _ = base.request(
+                    self.port, "POST", f"/payments/{payment_id}/corrections",
+                    body={"expected_revision": 1, "amount": 300,
+                          "effective_at": created_at, "reason": "once"},
+                    headers={**ada, "Idempotency-Key": "k-once"})
+                statuses.append(status)
+            except Exception as exc:
+                statuses.append(repr(exc))
+
+        threads = [threading.Thread(target=attempt) for _ in range(8)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        self.assertEqual(sorted(statuses), [200] * 7 + [201], statuses)
+        self.assertEqual(state.users["u_ada"].balance, 9000)
+        self.assertEqual(state.users["u_bob"].balance, 10400)
+        status, revisions, _ = base.request(self.port,
+                                            "GET", f"/payments/{payment_id}/revisions",
+                                            headers=ada)
+        self.assertEqual([r["amount"] for r in revisions["revisions"]], [500, 300])
+        total = 0
+        for email in ("ada@example.com", "bob@example.com", "cy@example.com"):
+            status, me_payload, _ = base.request(
+                self.port, "GET",
+                "/me?as_of=2999-01-01T00%3A00%3A00%2B00%3A00",
+                headers=login(self.port, email))
+            total += me_payload["total"]
+        self.assertEqual(total, 20000)
+        self.assertEqual(sum(u.balance for u in state.users.values()), 20000)
+
     def test_concurrent_same_expected_revision_exactly_one_success(self):
         barrier = threading.Barrier(4)
         results = []
