@@ -119,6 +119,8 @@ def _seed_authorizations(state, fixture, reset_now):
             created_at=created_at,
             expires_at=expires_at,
             expires_dt=expires_dt,
+            closed_event_dt=(parse_rfc3339(created_at, "created_at")
+                             if status in ("captured", "voided") else None),
         )
         state.authorizations[authorization_id] = authorization
 

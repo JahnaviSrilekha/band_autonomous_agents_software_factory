@@ -6,9 +6,21 @@ from ..errors import (
 )
 from .. import state as state_module
 from ..state import (
-    AUTHORIZATION_STATUSES, STATE_LOCK, Authorization, effective_status, is_live_hold,
-    new_id, remaining_amount,
+    AUTHORIZATION_STATUSES, STATE_LOCK, Authorization, as_dt, effective_status,
+    is_live_hold, new_id, remaining_amount,
 )
+
+
+def _closed_at_iso(auth, now):
+    if is_live_hold(auth, now):
+        return None
+    if auth.status in ("captured", "voided"):
+        event = auth.closed_event_dt if auth.closed_event_dt is not None else auth.created_dt
+        return event.isoformat()
+    if auth.status == "expired":
+        event = auth.closed_event_dt if auth.closed_event_dt is not None else auth.expires_dt
+        return event.isoformat()
+    return auth.expires_at
 
 
 def authorization_json(state, auth, now):
@@ -24,6 +36,7 @@ def authorization_json(state, auth, now):
         "note": auth.note,
         "visibility": auth.visibility,
         "status": effective_status(auth, now),
+        "closed_at": _closed_at_iso(auth, now),
         "expires_at": auth.expires_at,
         "payment_id": auth.payment_ids[-1] if auth.payment_ids else None,
         "payment_ids": list(auth.payment_ids),
@@ -114,6 +127,7 @@ def capture_authorization(user, body, params, query):
         authorization.payment_ids.append(payment.id)
         if final or authorization.captured_amount >= authorization.amount:
             authorization.status = "captured"
+            authorization.closed_event_dt = as_dt(payment.effective_at)
         return 201, payment_json(state, payment)
 
 
@@ -134,6 +148,7 @@ def void_authorization(user, body, params, query):
         if authorization.status != "open" or authorization.expires_dt <= now:
             raise ApiError(409, "authorization_not_open", "authorization is not open")
         authorization.status = "voided"
+        authorization.closed_event_dt = now
         return 200, authorization_json(state, authorization, now)
 
 
