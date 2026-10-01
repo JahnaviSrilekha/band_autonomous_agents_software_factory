@@ -82,7 +82,8 @@ class TestT47ExportV3(unittest.TestCase):
         self.assertEqual(payments["p_a1"]["revisions"][:1],
                          [{"revision": 1, "amount": 3000,
                            "effective_at": "2026-08-10T09:00:00+00:00",
-                           "recorded_at": "2026-08-10T09:00:00+00:00", "reason": ""}])
+                           "recorded_at": "2026-08-10T09:00:00+00:00", "reason": "",
+                           "correction_batch_id": None}])
         second = payments["p_a1"]["revisions"][1]
         self.assertEqual((second["revision"], second["amount"], second["reason"]),
                          (2, 2500, "fix"))

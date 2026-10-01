@@ -17,6 +17,7 @@ def payment_json(state, payment):
         "request_id": payment.request_id,
         "settlement_id": payment.settlement_id,
         "authorization_id": payment.authorization_id,
+        "refund_of": payment.refund_of,
         "created_at": payment.effective_at,
     }
 

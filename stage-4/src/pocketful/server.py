@@ -70,8 +70,10 @@ _add_auth_routes()
 
 def _add_wallet_routes():
     from .handlers.activity import list_activity
+    from .handlers.correction_batches import create_correction_batch
     from .handlers.corrections import create_correction
     from .handlers.payments import create_payment
+    from .handlers.refunds import create_refund
     from .handlers.requests_page import requests_page
     from .handlers.splits import create_split
     from .handlers.settlements import create_settlement
@@ -83,6 +85,8 @@ def _add_wallet_routes():
     ROUTES.append(Route("POST", r"^/payments$", create_payment, auth=True, idem=True))
     ROUTES.append(Route("POST", r"^/payments/(?P<id>[^/]+)/corrections$", create_correction,
                         auth=True, idem=True))
+    ROUTES.append(Route("POST", r"^/payments/(?P<id>[^/]+)/refunds$", create_refund,
+                        auth=True, idem=True))
     ROUTES.append(Route("GET", r"^/statement$", get_statement, auth=True))
     ROUTES.append(Route("POST", r"^/requests$", create_request, auth=True, idem=True))
     ROUTES.append(Route("POST", r"^/requests/(?P<id>[^/]+)/pay$", pay_request, auth=True, idem=True))
@@ -92,6 +96,8 @@ def _add_wallet_routes():
     ROUTES.append(Route("GET", r"^/activity$", list_activity, auth=True))
     ROUTES.append(Route("POST", r"^/splits$", create_split, auth=True, idem=True))
     ROUTES.append(Route("POST", r"^/settlements$", create_settlement, auth=True, idem=True, operator=True))
+    ROUTES.append(Route("POST", r"^/correction-batches$", create_correction_batch,
+                        auth=True, idem=True, operator=True))
 
 
 _add_wallet_routes()

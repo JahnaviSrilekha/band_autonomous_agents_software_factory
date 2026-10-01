@@ -124,7 +124,7 @@ class TestT45Statement(unittest.TestCase):
                                                "to_user_id", "to_handle", "amount",
                                                "currency", "note", "visibility",
                                                "request_id", "settlement_id",
-                                               "authorization_id", "created_at"})
+                                               "authorization_id", "refund_of", "created_at"})
         self.assertEqual(payment["amount"], 3000)
         self.assertEqual(entry["revision"], 1)
         self.assertEqual(entry["effective_at"], "2026-08-10T09:00:00+00:00")
