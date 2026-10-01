@@ -2,7 +2,7 @@ from ..errors import ApiError
 from .. import state as state_module
 from ..state import (
     AUTHORIZATION_STATUSES, STATE_LOCK, Authorization, IdempotencyRecord, Payment, Request,
-    Settlement, Split, State, User, parse_rfc3339,
+    Revision, Settlement, Split, State, User, parse_rfc3339,
 )
 from ..reset import HANDLE_RE, _fixture_amount, _fixture_string, _fixture_ttl
 
@@ -26,7 +26,8 @@ def state_to_json(state):
              "to_user_id": p.to_user_id, "amount": p.amount, "note": p.note,
              "visibility": p.visibility, "request_id": p.request_id,
              "settlement_id": p.settlement_id, "effective_at": p.effective_at,
-             "recorded_at": p.recorded_at, "authorization_id": p.authorization_id}
+             "recorded_at": p.recorded_at, "authorization_id": p.authorization_id,
+             "revisions": [r.to_json() for r in p.revisions]}
             for p in state.payments
         ],
         "requests": [
@@ -40,7 +41,9 @@ def state_to_json(state):
              "to_user_id": a.to_user_id, "amount": a.amount, "note": a.note,
              "visibility": a.visibility, "status": a.status,
              "captured_amount": a.captured_amount, "payment_ids": list(a.payment_ids),
-             "created_at": a.created_at, "expires_at": a.expires_at}
+             "created_at": a.created_at, "expires_at": a.expires_at,
+             "closed_event_at": (a.closed_event_dt.isoformat()
+                                 if a.closed_event_dt is not None else None)}
             for a in state.authorizations.values()
         ],
         "splits": [
@@ -71,7 +74,7 @@ def _require_list(payload, field):
     return value
 
 
-def state_from_json(payload):
+def state_from_json(payload, format_version):
     state = State()
     currency = payload.get("currency")
     if not isinstance(currency, str) or not currency:
@@ -127,13 +130,15 @@ def state_from_json(payload):
     for entry in _authorization_list(payload):
         if not isinstance(entry, dict):
             raise ApiError(422, "validation_failed", "each authorization must be an object")
-        authorization = _authorization_from_json(state, entry)
+        authorization = _authorization_from_json(state, entry, format_version)
         state.authorizations[authorization.id] = authorization
     for entry in _require_list(payload, "payments"):
         if not isinstance(entry, dict):
             raise ApiError(422, "validation_failed", "each payment must be an object")
-        payment = _payment_from_json(state, entry)
+        payment = _payment_from_json(state, entry, format_version)
         state.payments.append(payment)
+    _apply_imported_opening_balances(state)
+    state.reset_epoch += 1
     for entry in _require_list(payload, "splits"):
         if not isinstance(entry, dict):
             raise ApiError(422, "validation_failed", "each split must be an object")
@@ -150,6 +155,15 @@ def state_from_json(payload):
         record = _idempotency_from_json(state, entry)
         state.idempotency[(record.user_id, record.method, record.path, record.key)] = record
     return state
+
+
+def _apply_imported_opening_balances(state):
+    net = {user_id: 0 for user_id in state.users}
+    for payment in state.payments:
+        net[payment.from_user_id] -= payment.amount
+        net[payment.to_user_id] += payment.amount
+    for user_id, user in state.users.items():
+        user.opening_balance = user.balance - net[user_id]
 
 
 def _request_from_json(state, entry):
@@ -185,7 +199,7 @@ def _authorization_list(payload):
     return value
 
 
-def _authorization_from_json(state, entry):
+def _authorization_from_json(state, entry, format_version):
     authorization_id = _fixture_string(entry, "id")
     from_user_id = _fixture_string(entry, "from_user_id")
     to_user_id = _fixture_string(entry, "to_user_id")
@@ -223,15 +237,54 @@ def _authorization_from_json(state, entry):
         raise ApiError(422, "validation_failed", "created_at must be a string")
     expires_at = entry.get("expires_at")
     expires_dt = parse_rfc3339(expires_at, "authorization expires_at")
+    closed_event_dt = None
+    if format_version >= 3:
+        raw_closed = entry.get("closed_event_at")
+        if raw_closed is not None:
+            if not isinstance(raw_closed, str):
+                raise ApiError(422, "validation_failed",
+                               "closed_event_at must be a string or null")
+            closed_event_dt = parse_rfc3339(raw_closed, "closed_event_at")
+    elif status in ("captured", "voided"):
+        closed_event_dt = parse_rfc3339(created_at, "created_at")
     record_seq = entry.get("seq", 0)
     if isinstance(record_seq, bool) or not isinstance(record_seq, int) or record_seq < 0:
         raise ApiError(422, "validation_failed", "authorization seq must be a non-negative integer")
     return Authorization(authorization_id, from_user_id, to_user_id, amount, note,
                          visibility, status, captured_amount, list(payment_ids),
-                         created_at, expires_at, expires_dt, seq=record_seq)
+                         created_at, expires_at, expires_dt, seq=record_seq,
+                         closed_event_dt=closed_event_dt)
 
 
-def _payment_from_json(state, entry):
+def _revisions_from_json(entry):
+    raw = entry.get("revisions")
+    if not isinstance(raw, list) or not raw:
+        raise ApiError(422, "validation_failed",
+                       "payment revisions must be a non-empty array")
+    revisions = []
+    for item in raw:
+        if not isinstance(item, dict):
+            raise ApiError(422, "validation_failed", "each revision must be an object")
+        number = item.get("revision")
+        if isinstance(number, bool) or not isinstance(number, int) or number < 1:
+            raise ApiError(422, "validation_failed", "revision must be a positive integer")
+        amount = _fixture_amount(item.get("amount"), 0, "revision amount")
+        effective_at = item.get("effective_at")
+        recorded_at = item.get("recorded_at")
+        if not isinstance(effective_at, str) or not isinstance(recorded_at, str):
+            raise ApiError(422, "validation_failed", "revision timestamps must be strings")
+        reason = item.get("reason", "")
+        if not isinstance(reason, str):
+            raise ApiError(422, "validation_failed", "revision reason must be a string")
+        revisions.append(Revision(number, amount, effective_at, recorded_at, reason))
+    numbers = [r.revision for r in revisions]
+    if numbers != list(range(1, len(numbers) + 1)):
+        raise ApiError(422, "validation_failed",
+                       "payment revisions must be numbered 1..N in order")
+    return revisions
+
+
+def _payment_from_json(state, entry, format_version):
     payment_id = _fixture_string(entry, "id")
     from_user_id = _fixture_string(entry, "from_user_id")
     to_user_id = _fixture_string(entry, "to_user_id")
@@ -262,9 +315,10 @@ def _payment_from_json(state, entry):
     record_seq = entry.get("seq")
     if isinstance(record_seq, bool) or not isinstance(record_seq, int):
         raise ApiError(422, "validation_failed", "payment seq must be an integer")
+    revisions = _revisions_from_json(entry) if format_version >= 3 else None
     return Payment(payment_id, from_user_id, to_user_id, amount, note, visibility,
                    request_id, settlement_id, effective_at, recorded_at, record_seq,
-                   authorization_id)
+                   authorization_id, revisions=revisions)
 
 
 def _split_from_json(state, entry):
@@ -336,7 +390,7 @@ def _idempotency_from_json(state, entry):
 def handle_export(user, body, params, query):
     with STATE_LOCK:
         state = state_module.STATE
-        return 200, {"track": "pocketful", "format_version": 2, "state": state_to_json(state)}
+        return 200, {"track": "pocketful", "format_version": 3, "state": state_to_json(state)}
 
 
 def handle_import(user, body, params, query):
@@ -344,12 +398,12 @@ def handle_import(user, body, params, query):
         raise ApiError(422, "validation_failed", "track must be pocketful")
     version = body.get("format_version")
     if (isinstance(version, bool) or not isinstance(version, (int, float))
-            or version not in (1, 2)):
-        raise ApiError(422, "validation_failed", "format_version must be 1 or 2")
+            or version not in (1, 2, 3)):
+        raise ApiError(422, "validation_failed", "format_version must be 1, 2 or 3")
     payload_state = body.get("state")
     if not isinstance(payload_state, dict):
         raise ApiError(422, "validation_failed", "state is required")
-    new_state = state_from_json(payload_state)
+    new_state = state_from_json(payload_state, version)
     with STATE_LOCK:
         state_module.STATE = new_state
     return 204, None
