@@ -613,3 +613,21 @@ Kind values: behaviour, error, limit, concurrency, retry, time, compatibility, i
   throughout this document (e.g. stage-1's rounding table is normative while endpoint JSON
   samples elsewhere are illustrative); an example that contradicts an adjacent explicit
   formula is the example's abbreviation, not a second rule.
+- **A28** (recorded post-verification, reviewer finding). Server-rendered authenticated page
+  routes (`/`, `/requests`, `/split`, `/authorizations`) authenticate via a session cookie
+  (`pocketful_token`, the bearer token URL-encoded, `path=/; SameSite=Lax`) that the client
+  script sets via `document.cookie` after a successful `POST /auth/login` or
+  `/auth/signup` — the server itself never sends `Set-Cookie`; the API's bearer-token
+  contract (stage-1 §6) is unchanged for every JSON endpoint. A client that does not execute
+  the page's JavaScript (a pure-HTTP client with no cookie jar primed from that script) will
+  not see authenticated content on a server-rendered page load, by design — this is not a
+  product defect. Reasoning: nothing in stage-2.md specifies the session-establishment
+  mechanism for a full page navigation (which cannot carry a custom `Authorization` header);
+  R96/"integration testing" and the spec's own UI-testing framing, plus the fact that
+  developer's Playwright (JS-executing) e2e suite passes 46/46 against every authenticated
+  route, indicate the intended testing mode executes the page's script like a real browser
+  does. Changing the server to also set `Set-Cookie` on login — purely to satisfy a
+  pure-HTTP black-box suite — would be a behavior change whose only justification is a check
+  result, which the run's "never add behaviour whose only justification is a check result"
+  rule forecloses; instead, a black-box HTTP suite exercising an authenticated page route
+  must replicate the same cookie (name, value, encoding) the client script sets.
