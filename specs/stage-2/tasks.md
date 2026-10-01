@@ -64,4 +64,11 @@ those tasks' done-tests re-run the relevant stage-1 case tables to confirm no re
 A22's contradictory-seed validation rules were not fully covered by T20's landed
 implementation — see T37's row above. Small, scoped fix to the same file T20 already
 owns; not a new requirement, just closing a gap between A22 (recorded in amend-1) and
-T20's original acceptance criteria (written before amend-1 existed).
+T20's original acceptance criteria (written before amend-1 existed). **Done** in `dd90de6`.
+
+| id | reqs | files | deps | done test | status | batch |
+|---|---|---|---|---|---|---|
+| T38 | R6 (stage-1, carried forward) | `stage-2/RUN.md` | T2 | Reviewer's stage-2 verification (b9bd074) flagged `stage-2/RUN.md` as an unedited copy of stage-1's (wrong title/paths). Fixed: correct stage-2 title/paths, six-route screens table, `/requests`+`/authorizations` content-negotiation note, `pocketful_token` cookie-session contract (A28), stage-2 fixture fields. Docs-only — build/run commands unchanged, re-verified unit suite (325 OK), no harness regression | done | 5 |
+
+**T38** (added after stage verification, reviewer's hygiene finding): cosmetic doc fix,
+no behavior change. Done in `606c59c`.
