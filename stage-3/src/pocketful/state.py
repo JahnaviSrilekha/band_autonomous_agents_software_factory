@@ -347,10 +347,12 @@ def _check_historical_overdraft(state, payment, new_amount, effective_dt, now):
             amount = revision.amount
         if instant > now:
             continue
-        movements[other.from_user_id][instant] = (
-            movements[other.from_user_id].get(instant, 0) - amount)
-        movements[other.to_user_id][instant] = (
-            movements[other.to_user_id].get(instant, 0) + amount)
+        if other.from_user_id in movements:
+            movements[other.from_user_id][instant] = (
+                movements[other.from_user_id].get(instant, 0) - amount)
+        if other.to_user_id in movements:
+            movements[other.to_user_id][instant] = (
+                movements[other.to_user_id].get(instant, 0) + amount)
     running = {user_id: state.users[user_id].opening_balance for user_id in parties}
     if any(value < 0 for value in running.values()):
         raise ApiError(409, "historical_overdraft",

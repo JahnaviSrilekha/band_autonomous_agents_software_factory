@@ -241,6 +241,34 @@ class TestT41HistoricalOverdraft(unittest.TestCase):
         payment = next(p for p in state_module.STATE.payments if p.id == "p_old")
         self.assertEqual(len(payment.revisions), 1)
 
+    def test_correction_scan_ignores_payments_without_both_parties(self):
+        fixture = {
+            "currency": "EUR", "minor_units": 2,
+            "users": [
+                {"id": "u_ada", "email": "ada@example.com", "password": "correct horse",
+                 "display_name": "Ada", "handle": "ada", "balance": 10000},
+                {"id": "u_bob", "email": "bob@example.com", "password": "correct horse",
+                 "display_name": "Bob", "handle": "bob", "balance": 10000},
+                {"id": "u_cy", "email": "cy@example.com", "password": "correct horse",
+                 "display_name": "Cy", "handle": "cy", "balance": 10000},
+            ],
+            "payments": [
+                {"id": "p_1", "from_user_id": "u_ada", "to_user_id": "u_bob",
+                 "amount": 1000, "created_at": "2026-08-01T09:00:00+00:00"},
+                {"id": "p_2", "from_user_id": "u_cy", "to_user_id": "u_bob",
+                 "amount": 500, "created_at": "2026-08-02T09:00:00+00:00"},
+            ],
+        }
+        status, _, _ = base.request(self.port, "POST", "/_test/reset", body=fixture)
+        self.assertEqual(status, 204)
+        ada = self.login("ada@example.com")
+        status, payload, _ = base.request(
+            self.port, "POST", "/payments/p_1/corrections",
+            body={"expected_revision": 1, "amount": 1500,
+                  "effective_at": "2026-08-01T09:00:00+00:00", "reason": "bump"},
+            headers={**ada, "Idempotency-Key": "k-third"})
+        self.assertEqual(status, 201, payload)
+
     def test_same_instant_correction_combined_not_isolated(self):
         status, _, _ = base.request(self.port, "POST", "/_test/reset", body=COMBINED_FIXTURE)
         self.assertEqual(status, 204)
