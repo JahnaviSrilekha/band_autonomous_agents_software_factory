@@ -123,6 +123,27 @@ def test_r268_correction_debits_gate_on_available(c):
                  "receiver-side debit (reducing a payment) gated by bob's available")
 
 
+def test_r267_floor_checked_after_staleness(c):
+    """Design sec7 (resolved): when a correction is both stale and below the
+    refunded floor, staleness is reported first — the batch endpoint agrees."""
+    toks = fresh(c)
+    p = pay(c, toks, amount=1000)
+    expect_ok(refund(c, toks["bob"], p["payment_id"], "rf-1",
+                     refund_body(200)), 201)
+    # Both violations at once: stale expected_revision AND amount below floor.
+    expect_error(correct(c, toks["ada"], p["payment_id"], "c-both",
+                         correction_body(2, 100, p["created_at"], "dip")),
+                 409, "stale_revision",
+                 "staleness precedes the refunded floor (design sec6/sec7)")
+    eq([r["revision"] for r in revisions_of(c, toks["ada"], p["payment_id"])],
+       [1], "state unchanged after the precedence rejection")
+    # Mirror: fresh revision, same floor-violating amount -> floor code.
+    expect_error(correct(c, toks["ada"], p["payment_id"], "c-floor",
+                         correction_body(1, 100, p["created_at"], "dip")),
+                 422, "refund_exceeds_payment",
+                 "same amount with fresh revision hits the floor (R267)")
+
+
 def test_r267_floor_applies_after_multiple_refunds(c):
     toks = fresh(c)
     p = pay(c, toks, amount=1000)

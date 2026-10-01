@@ -142,6 +142,31 @@ def test_r273_stale_revision(c):
                  404, "not_found", "reversed order -> 404")
 
 
+def test_r267_floor_checked_after_staleness_in_batch(c):
+    """Design sec6 step 1 (resolved): per-item sub-order ends shape ->
+    existence -> immutability -> staleness -> floor, so a stale
+    expected_revision is reported before the refunded floor — matching the
+    single-correction endpoint (design sec7)."""
+    toks, _ = seeded_batch_state(c, n=1)
+    p = expect_ok(make_payment(c, toks["ada"], "bob", 500, "p-rf"), 201)
+    expect_ok(refund(c, toks["bob"], p["payment_id"], "rf-1",
+                     refund_body(200)), 201)
+    # Stale expected_revision AND floor-violating amount: staleness wins.
+    expect_error(correction_batch(c, toks["op"], "b-both",
+                                  [batch_item(p["payment_id"], 5, 100,
+                                              p["created_at"])]),
+                 409, "stale_revision",
+                 "staleness precedes the refunded floor in batches (design sec6)")
+    # Fresh revision, same floor-violating amount: floor code (422).
+    expect_error(correction_batch(c, toks["op"], "b-floor",
+                                  [batch_item(p["payment_id"], 1, 100,
+                                              p["created_at"])]),
+                 422, "refund_exceeds_payment",
+                 "floor violation reported with fresh revision (R267)")
+    eq([r["revision"] for r in revisions_of(c, toks["ada"], p["payment_id"])],
+       [1], "state unchanged after both rejections")
+
+
 def test_r274_operator_reaches_many_kinds_immutable_ones_rejected(c):
     toks, _ = seeded_batch_state(c, n=1)
     # Ordinary + request payment in one batch, operator is not their sender.

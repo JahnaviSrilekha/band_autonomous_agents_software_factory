@@ -46,13 +46,13 @@ stage-2 UI module runs as the UI regression.
 | R264 | test_refunds.test_r264_refund_of_null_elsewhere_and_everywhere |
 | R265 | test_refund_corrections.test_r265_single_correction_still_works |
 | R266 | test_refund_corrections.test_r266_capture_and_refund_immutable |
-| R267 | test_refund_corrections.test_r267_correction_cannot_dip_below_refunded, .test_r267_concurrent_refund_vs_correction, .test_r267_floor_applies_after_multiple_refunds |
+| R267 | test_refund_corrections.test_r267_correction_cannot_dip_below_refunded, .test_r267_concurrent_refund_vs_correction, .test_r267_floor_applies_after_multiple_refunds, .test_r267_floor_checked_after_staleness |
 | R268 | test_refund_corrections.test_r268_correction_debits_gate_on_available |
 | R269 | test_batch_corrections.test_r269_auth_operator_key_order |
 | R270 | test_batch_corrections.test_r270_bounds_and_distinct_ids |
 | R271 | test_batch_corrections.test_r271_item_field_validation_in_input_order |
 | R272 | test_batch_corrections.test_r272_unknown_payment_404_whole_batch |
-| R273 | test_batch_corrections.test_r273_stale_revision |
+| R273 | test_batch_corrections.test_r273_stale_revision, .test_r267_floor_checked_after_staleness_in_batch (staleness-before-floor sub-order, design sec6/sec7) |
 | R274 | test_batch_corrections.test_r274_operator_reaches_many_kinds_immutable_ones_rejected |
 | R275 | test_batch_corrections.test_r275_precedence_item_errors_then_completeness_then_funds, .test_r275_historical_overdraft_combined_boundaries |
 | R276 | test_batch_corrections.test_r276_incomplete_settlement |
