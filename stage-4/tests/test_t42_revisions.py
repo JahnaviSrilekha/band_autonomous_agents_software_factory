@@ -60,7 +60,7 @@ class TestT42Revisions(unittest.TestCase):
         self.assertEqual(len(payload["revisions"]), 2)
         first, second = payload["revisions"]
         self.assertEqual(set(first.keys()), {"revision", "amount", "effective_at",
-                                             "recorded_at", "reason"})
+                                             "recorded_at", "reason", "correction_batch_id"})
         self.assertEqual(first["revision"], 1)
         self.assertEqual(first["amount"], 500)
         self.assertEqual(first["reason"], "")

@@ -57,7 +57,7 @@ class TestCreatePayment(unittest.TestCase):
         self.assertEqual(set(payload.keys()), {
             "payment_id", "from_user_id", "from_handle", "to_user_id", "to_handle",
             "amount", "currency", "note", "visibility", "request_id", "settlement_id",
-            "authorization_id", "created_at",
+            "authorization_id", "refund_of", "created_at",
         })
         self.assertEqual(payload["from_handle"], "ada")
         self.assertEqual(payload["to_handle"], "bob")
