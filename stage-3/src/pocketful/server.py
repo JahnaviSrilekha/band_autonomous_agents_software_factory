@@ -70,6 +70,7 @@ _add_auth_routes()
 
 def _add_wallet_routes():
     from .handlers.activity import list_activity
+    from .handlers.corrections import create_correction
     from .handlers.payments import create_payment
     from .handlers.requests_page import requests_page
     from .handlers.splits import create_split
@@ -79,6 +80,8 @@ def _add_wallet_routes():
     )
 
     ROUTES.append(Route("POST", r"^/payments$", create_payment, auth=True, idem=True))
+    ROUTES.append(Route("POST", r"^/payments/(?P<id>[^/]+)/corrections$", create_correction,
+                        auth=True, idem=True))
     ROUTES.append(Route("POST", r"^/requests$", create_request, auth=True, idem=True))
     ROUTES.append(Route("POST", r"^/requests/(?P<id>[^/]+)/pay$", pay_request, auth=True, idem=True))
     ROUTES.append(Route("POST", r"^/requests/(?P<id>[^/]+)/decline$", decline_request, auth=True))
