@@ -110,8 +110,13 @@ any of the following, return that error immediately (R271-R274):
    batch corrections, R274).
 3. Immutability: `_is_correction_immutable(payment)` (§4) — 422 `linked_payment_immutable`
    (R266 code, reused).
-4. Floor: `refunded_total(state, payment.id) > amount` — 422 `refund_exceeds_payment` (R267).
-5. Staleness: `expected_revision != len(payment.revisions)` — 409 `stale_revision` (R273).
+4. Staleness: `expected_revision != len(payment.revisions)` — 409 `stale_revision` (R273).
+5. Floor: `refunded_total(state, payment.id) > amount` — 422 `refund_exceeds_payment` (R267).
+
+(Corrected per reviewer's stage-4 batch-2 finding: staleness before floor, matching §7's
+single-correction order below — neither R267 nor R273 pins this sub-order, but the two
+endpoints should agree on it for the mechanically same violation shape instead of silently
+diverging.)
 
 Step 1 fully resolves every item (payment object + parsed fields) before step 2 begins; it
 does not interleave with steps 2-4's cross-item or funds checks (R275's "item errors... before
@@ -155,9 +160,9 @@ correction_batch_id=batch_id)` and apply its balance delta (reusing
   (R266).
 - One new check, `refunded_total(state, payment.id) > amount` → 422 `refund_exceeds_payment`
   (R267), inserted immediately after the staleness check (`expected_revision`) and before
-  `check_correction_funds` — same relative position as the batch pipeline's step 1.4 (§6),
-  keeping the two endpoints' internal check order consistent even though one is per-item and
-  the other is a single call.
+  `check_correction_funds` — now the same relative position as the batch pipeline's step 1,
+  item 5 (§6, corrected), keeping the two endpoints' internal check order consistent even
+  though one is per-item and the other is a single call.
 
 No other line of `create_correction` changes; `check_correction_funds`/
 `_check_historical_overdraft` (stage-3 design §9) are reused unmodified for the single-payment
