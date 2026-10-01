@@ -158,6 +158,15 @@ def _is_correction_immutable(payment):
     return payment.authorization_id is not None or payment.refund_of is not None
 
 
+def compute_batch_recorded_at(state, payments):
+    latest = now_dt()
+    for payment in payments:
+        last_dt = as_dt(payment.revisions[-1].recorded_at)
+        if last_dt > latest:
+            latest = last_dt
+    return (latest + timedelta(microseconds=1)).isoformat()
+
+
 class Request:
     def __init__(self, id, requester_id, payer_id, amount, note, status, payment_id,
                  created_at, seq):
