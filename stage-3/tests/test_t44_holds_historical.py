@@ -174,6 +174,43 @@ class TestT44HistoricalHolds(unittest.TestCase):
                                      headers=login(self.port, "bob@example.com"))
         self.assertEqual(payload["held"], 0)
 
+    def test_future_seeded_authorization_created_at_422_no_state_change(self):
+        fixture = {
+            "currency": "EUR", "minor_units": 2,
+            "users": FIXTURE["users"],
+            "authorizations": [
+                {"id": "a_future", "from_user_id": "u_ada", "to_user_id": "u_bob",
+                 "amount": 500, "status": "open", "created_at": "2099-06-01T00:00:00+00:00",
+                 "expires_at": "2099-06-02T00:00:00+00:00"},
+            ],
+        }
+        status, payload, _ = base.request(self.port, "POST", "/_test/reset", body=fixture)
+        self.assertEqual(status, 422)
+        self.assertEqual(payload["error"]["code"], "validation_failed")
+        self.assertEqual(state_module.STATE.authorizations.keys(), {"a_hold"})
+
+    def test_seeded_authorization_created_at_drives_ordering(self):
+        fixture = {
+            "currency": "EUR", "minor_units": 2,
+            "users": FIXTURE["users"],
+            "authorizations": [
+                {"id": "a_early", "from_user_id": "u_ada", "to_user_id": "u_bob",
+                 "amount": 100, "status": "open",
+                 "created_at": "2026-08-01T00:00:00+00:00",
+                 "expires_at": "2099-06-02T00:00:00+00:00"},
+                {"id": "a_late", "from_user_id": "u_ada", "to_user_id": "u_bob",
+                 "amount": 200, "status": "open",
+                 "created_at": "2026-08-02T00:00:00+00:00",
+                 "expires_at": "2099-06-02T00:00:00+00:00"},
+            ],
+        }
+        status, _, _ = base.request(self.port, "POST", "/_test/reset", body=fixture)
+        self.assertEqual(status, 204)
+        ada = login(self.port, "ada@example.com")
+        status, payload, _ = base.request(self.port, "GET", "/authorizations", headers=ada)
+        ids = [a["authorization_id"] for a in payload["authorizations"]]
+        self.assertEqual(ids, ["a_late", "a_early"])
+
     def test_seeded_closed_hold_no_prior_lifecycle(self):
         fixture = {
             "currency": "EUR", "minor_units": 2,

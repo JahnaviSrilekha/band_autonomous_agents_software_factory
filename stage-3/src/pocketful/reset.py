@@ -106,6 +106,11 @@ def _seed_authorizations(state, fixture, reset_now):
         created_at = entry.get("created_at", stamp)
         if not isinstance(created_at, str):
             raise ApiError(422, "validation_failed", "created_at must be a string")
+        created_dt = parse_rfc3339(created_at, "seeded authorization created_at",
+                                   require_offset=True)
+        if created_dt > reset_now:
+            raise ApiError(422, "validation_failed",
+                           "seeded authorization created_at must not be in the future")
         authorization = Authorization(
             id=authorization_id,
             from_user_id=from_user_id,
@@ -119,8 +124,8 @@ def _seed_authorizations(state, fixture, reset_now):
             created_at=created_at,
             expires_at=expires_at,
             expires_dt=expires_dt,
-            closed_event_dt=(parse_rfc3339(created_at, "created_at")
-                             if status in ("captured", "voided") else None),
+            created_dt=created_dt,
+            closed_event_dt=(created_dt if status in ("captured", "voided") else None),
         )
         state.authorizations[authorization_id] = authorization
 
