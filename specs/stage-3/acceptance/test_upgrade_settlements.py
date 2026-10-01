@@ -5,7 +5,7 @@ import os
 from client import (
     check, eq, expect_error, expect_ok, fixture, fpayment, get_me, correct,
     correction_body, revisions_of, revision_keys_ok, statement_ok, me_json,
-    fuser, make_payment, create_authz, capture, T1, T2, RFC3339,
+    statement_view, fuser, make_payment, create_authz, capture, T1, T2, RFC3339,
 )
 
 HERE = os.path.dirname(os.path.abspath(__file__))

@@ -111,7 +111,8 @@ def test_exactly_once_concurrent_identical_corrections(c):
     eq({r.json()["revision"] for r in created + replays}, {2},
        "every response carries the single new revision (R52)")
     eq(len(revisions_of(c, toks["ada"], pid)), 2, "one revision appended once (R3)")
-    eq(get_me(c, toks["ada"])["balance"], 9300 + 200, "money moved exactly once (R3)")
+    eq(get_me(c, toks["ada"])["balance"], 9300 - 500 + 200,
+       "money moved exactly once: the payment's own debit, then the 200 refund (R3)")
 
 
 def test_no_5xx_under_mixed_concurrent_load(c):

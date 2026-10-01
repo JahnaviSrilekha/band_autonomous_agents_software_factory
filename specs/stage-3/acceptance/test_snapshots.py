@@ -24,9 +24,10 @@ def sfix(c):
 
 def body_key(body):
     """The frozen content of a statement response (everything but a fresh
-    snapshot token, whose value is per-call; presence asserted separately)."""
-    return {k: body[k] for k in ("opening_balance", "closing_balance", "has_more")
-            }, [e for e in body["entries"]]
+    snapshot token, whose value is per-call, and has_more, which legitimately
+    differs across page sizes)."""
+    return {k: body[k] for k in ("opening_balance", "closing_balance")}, \
+        [e for e in body["entries"]]
 
 
 def test_r221_snapshot_on_first_read(c):
@@ -82,6 +83,9 @@ def test_r225_unknown_other_user_and_stale_tokens(c):
                  "another user's token (R225)")
     pre_reset_token = ada_token
     eq(c.reset(fixture(users=USERS, payments=PAYMENTS)).status, 204, "reset")
+    # Reset invalidates bearer tokens too — re-login so the assertion below
+    # exercises the snapshot-token 404 path (R225), not authentication.
+    toks["ada"] = c.token_for("ada")
     expect_error(statement_view(c, toks["ada"], snapshot=pre_reset_token), 404,
                  "not_found", "token from before reset (R225)")
 
@@ -95,6 +99,9 @@ def test_r226_token_valid_until_reset(c):
     check(statement_ok(c, toks["ada"], snapshot=token, limit=1),
           "token still valid after unrelated writes (R226)")
     eq(c.reset(fixture(users=USERS, payments=PAYMENTS)).status, 204, "reset")
+    # Reset invalidates bearer tokens too — re-login so the assertion below
+    # exercises the snapshot-token 404 path (R226), not authentication.
+    toks["ada"] = c.token_for("ada")
     expect_error(statement_view(c, toks["ada"], snapshot=token), 404, "not_found",
                  "token invalid after reset (R226)")
 

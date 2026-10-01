@@ -65,6 +65,19 @@ SANCTIONED_STAGE3_DELTAS = {
     "stage1.test_export_import.test_round_trip_is_a_noop":
         "the service exports format_version 3 per ADR-010; round trip "
         "asserted in test_upgrade.test_export_v3_round_trip",
+    "stage2.test_authorizations.test_r139_create_shape_and_defaults":
+        "stage-3 R244 adds closed_at to every authorization representation, so "
+        "the exact-shape assertion (set == AUTHZ_KEYS) no longer holds; "
+        "closed_at presence/semantics asserted in test_holds.test_r244_closed_at "
+        "and the remaining R139 behavior is covered by stage2 "
+        "test_r139_note_visibility_explicit plus the stage-3 holds tests",
+    "stage2.test_authorizations.test_r148_r149_void":
+        "stage-3 R244 adds closed_at to every authorization representation, so "
+        "the exact-shape assertion (set == AUTHZ_KEYS) no longer holds; void "
+        "release semantics and closed_at are asserted in test_holds."
+        "test_r239_final_capture_and_void_release_at_event_time and test_holds."
+        "test_r244_closed_at, and void permissions remain covered by stage2 "
+        "test_r149_a15_void_permissions_and_ignored_key",
     "stage2.test_upgrade.test_r119_import_between_browser_requests":
         "the service now exports format_version 3 per ADR-010 (this test "
         "asserts the v2 export format mid-way); v3 export + round trip "
