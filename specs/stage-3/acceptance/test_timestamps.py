@@ -86,7 +86,7 @@ def correct_r159(c, token, pid, key, body):
 
 
 def test_r160_seeded_created_at_and_reset_default(c):
-    users, payments = seed_fixture({"p1": T1, "p2": None, "p3": T3})
+    users, payments = seed_fixture({"p1": T1, "p2": T2, "p3": None})
     r = c.reset(fixture(users=users, payments=payments))
     eq(r.status, 204, "reset with mixed seeded created_at")
     toks = {u["handle"]: c.token_for(u["handle"]) for u in users}

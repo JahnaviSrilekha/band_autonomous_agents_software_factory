@@ -4,7 +4,7 @@ from client import (
     check, eq, expect_error, expect_ok, afresh, fauthz, get_me, me_json,
     statement_ok, correct, correction_body, create_authz, capture, void_authz,
     list_authz, fuser, make_payment, fpayment, fixture, RFC3339, parse_inst,
-    shift, mid, T0, T1, T2, T3, FAR_PAST, FAR_FUTURE,
+    shift, mid, rfc3339, T0, T1, T2, T3, FAR_PAST, FAR_FUTURE,
 )
 
 EXPIRES_FUTURE = "2026-10-05T00:00:00+00:00"
@@ -12,7 +12,7 @@ EXPIRES_PAST = "2026-09-02T00:00:00+00:00"
 
 
 def hold_fix(c, extra_authz=None):
-    users = [fuser("u_ada", "ada", 400), fuser("u_bob", "bob", 100),
+    users = [fuser("u_ada", "ada", 900), fuser("u_bob", "bob", 100),
              fuser("u_cy", "cy", 700)]
     payments = [fpayment("p_h1", "u_ada", "u_bob", 100, created_at=T2),
                 fpayment("p_h2", "u_bob", "u_cy", 100, created_at=T3)]
@@ -25,6 +25,18 @@ def hold_fix(c, extra_authz=None):
     return {u["handle"]: c.token_for(u["handle"]) for u in users}
 
 
+def pfix(c):
+    """Same users/payments, no seeded holds — for tests that create their own
+    authorizations via the API."""
+    users = [fuser("u_ada", "ada", 900), fuser("u_bob", "bob", 100),
+             fuser("u_cy", "cy", 700)]
+    payments = [fpayment("p_h1", "u_ada", "u_bob", 100, created_at=T2),
+                fpayment("p_h2", "u_bob", "u_cy", 100, created_at=T3)]
+    r = c.reset(fixture(users=users, payments=payments))
+    eq(r.status, 204, "reset")
+    return {u["handle"]: c.token_for(u["handle"]) for u in users}
+
+
 def afresh_fixture(users, payments, authz):
     f = fixture(users=users, payments=payments)
     f["authorizations"] = authz
@@ -33,15 +45,16 @@ def afresh_fixture(users, payments, authz):
 
 def test_r238_all_four_money_fields_one_view(c):
     toks = hold_fix(c)
+    # ada: opening 1000, p_h1 (100 @ T2), a_1 holds 400 from T1.
     views = [
         # (as_of, known_at, expected total, expected held)
-        (T0, None, 500, 0),      # before hold creation and payment
-        (T1, None, 500, 400),    # hold active from its created_at (inclusive)
-        (T2, None, 400, 400),    # payment took effect
-        ("2026-10-04T00:00:00+00:00", None, 400, 400),  # beyond now, before deadline (R242)
-        (T2, T0, 500, 0),        # known_at before both events: nothing known
-        (T2, mid(T1, T2), 500, 400),  # hold known, payment not yet recorded
-        (T2, FAR_FUTURE, 400, 400),
+        (T0, None, 1000, 0),     # before hold creation and payment
+        (T1, None, 1000, 400),   # hold active from its created_at (inclusive)
+        (T2, None, 900, 400),    # payment took effect
+        ("2026-10-04T00:00:00+00:00", None, 900, 400),  # beyond now, before deadline (R242)
+        (T2, T0, 1000, 0),        # known_at before both events: nothing known
+        (T2, mid(T1, T2), 1000, 400),  # hold known, payment not yet recorded
+        (T2, FAR_FUTURE, 900, 400),
     ]
     for as_of, known_at, total, held in views:
         m = me_json(c, toks["ada"], as_of=as_of, known_at=known_at)
@@ -53,7 +66,7 @@ def test_r238_all_four_money_fields_one_view(c):
 
 
 def test_r239_capture_timeline_nonfinal(c):
-    toks = hold_fix(c)
+    toks = pfix(c)
     authz = expect_ok(create_authz(c, toks["ada"], "bob", 400, "h239-a"), 201)
     created = authz["created_at"]
     cap = expect_ok(capture(c, toks["bob"], authz["authorization_id"], "h239-cap",
@@ -73,7 +86,7 @@ def test_r239_capture_timeline_nonfinal(c):
 
 
 def test_r239_final_capture_and_void_release_at_event_time(c):
-    toks = hold_fix(c)
+    toks = pfix(c)
     a1 = expect_ok(create_authz(c, toks["ada"], "bob", 300, "h239-f"), 201)
     expect_ok(capture(c, toks["bob"], a1["authorization_id"], "h239-fcap", {}), 201)
     eq(me_json(c, toks["ada"])["held"], 0, "final capture releases everything (R239)")
@@ -94,7 +107,7 @@ def test_r240_expiry_at_expires_at(c):
        "before its expires_at the hold was active (R240)")
     eq(me_json(c, toks["ada"], as_of="2026-09-02T01:00:00+00:00")["held"], 400,
        "released exactly at expires_at (R240)")
-    lst = expect_ok(list_authz(c, toks["ada"], status="expired"), 200).json()
+    lst = expect_ok(list_authz(c, toks["ada"], status="expired"), 200)
     check(any(a["authorization_id"] == "a_exp" for a in lst["authorizations"]),
           "clock-expired authorization reports status expired (stage-2 R136)")
 
@@ -122,32 +135,32 @@ def test_r243_without_as_of_uses_request_start(c):
 
 
 def me_view_now():
-    from client import rfc3339
     return rfc3339(0)
 
 
 def test_r244_closed_at(c):
-    toks = hold_fix(c)
+    toks = pfix(c)
     authz = expect_ok(create_authz(c, toks["ada"], "bob", 200, "h244-a"), 201)
     check(authz["closed_at"] is None, "closed_at null while open (R244)")
-    lst = expect_ok(list_authz(c, toks["ada"]), 200).json()["authorizations"]
+    lst = expect_ok(list_authz(c, toks["ada"]), 200)["authorizations"]
     mine = [a for a in lst if a["authorization_id"] == authz["authorization_id"]][0]
     check(mine["closed_at"] is None, "list representation closed_at null (R244)")
     cap = expect_ok(capture(c, toks["bob"], authz["authorization_id"], "h244-cap", {}),
                     201)
-    mine = [a for a in expect_ok(list_authz(c, toks["ada"]), 200).json()["authorizations"]
+    mine = [a for a in expect_ok(list_authz(c, toks["ada"]), 200)["authorizations"]
             if a["authorization_id"] == authz["authorization_id"]][0]
     eq(mine["status"], "captured", "captured after final capture")
     eq(mine["closed_at"], cap["created_at"],
        "closed_at == capture event time (R244)")
-    v = expect_ok(void_authz(c, toks["ada"], "a_1"), 200)
+    a2 = expect_ok(create_authz(c, toks["ada"], "bob", 100, "h244-a2"), 201)
+    v = expect_ok(void_authz(c, toks["ada"], a2["authorization_id"]), 200)
     check(v["closed_at"] is not None and RFC3339.match(v["closed_at"]),
           "void sets closed_at (R244)")
     # Seeded clock-expired hold: closed_at == expires_at (R240/R244).
     toks2 = hold_fix(c, extra_authz=[
         fauthz("a_exp", "u_ada", "u_bob", 150, status="open",
                created_at=T1, expires_at=EXPIRES_PAST)])
-    mine2 = [a for a in expect_ok(list_authz(c, toks2["ada"]), 200).json()["authorizations"]
+    mine2 = [a for a in expect_ok(list_authz(c, toks2["ada"]), 200)["authorizations"]
              if a["authorization_id"] == "a_exp"][0]
     eq(mine2["closed_at"], EXPIRES_PAST, "clock expiry closes at expires_at (R244)")
     # Seeded captured/voided holds: closed_at non-null (value may be as-given).
@@ -156,8 +169,9 @@ def test_r244_closed_at(c):
                created_at=T1, expires_at=EXPIRES_FUTURE),
         fauthz("a_void", "u_bob", "u_cy", 50, status="voided",
                created_at=T1, expires_at=EXPIRES_FUTURE)])
-    got = {a["authorization_id"]: a for a in
-           expect_ok(list_authz(c, toks3["ada"]), 200).json()["authorizations"]}
+    got_ada = expect_ok(list_authz(c, toks3["ada"]), 200)["authorizations"]
+    got_bob = expect_ok(list_authz(c, toks3["bob"]), 200)["authorizations"]
+    got = {a["authorization_id"]: a for a in got_ada + got_bob}
     check(RFC3339.match(got["a_cap"]["closed_at"] or ""), "seeded captured closed_at set (R244)")
     check(got["a_void"]["closed_at"] is None or RFC3339.match(got["a_void"]["closed_at"]),
           "seeded voided closed_at present or null-as-given (R248: no lifecycle reconstruction)")
@@ -182,7 +196,8 @@ def test_r246_historical_overdraft_via_available(c):
 
 def test_r247_insufficient_funds_precedence(c):
     users = [fuser("u_ada", "ada", 500), fuser("u_bob", "bob", 0)]
-    payments = [fpayment("p_x", "u_ada", "u_bob", 100, created_at=T2)]
+    payments = [fpayment("p_x", "u_ada", "u_bob", 100, created_at=T2),
+                fpayment("p_z", "u_bob", "u_ada", 100, created_at=T3)]
     authz = [fauthz("a_h", "u_ada", "u_bob", 400, status="open",
                     created_at=T1, expires_at=EXPIRES_FUTURE)]
     r = c.reset(afresh_fixture(users, payments, authz))
@@ -223,19 +238,17 @@ def test_a35_seeded_authz_created_at_validation_and_ordering(c):
                  "future seeded authorization created_at rejected (A35)")
     eq(get_me(c, toks["ada"])["balance"], 400, "state unchanged (A35)")
     # Supplied created_at drives GET /authorizations ordering (A35/stage-2 R150).
-    hold_fix(c, extra_authz=[
+    toks = hold_fix(c, extra_authz=[
         fauthz("a_new", "u_bob", "u_cy", 25, status="open",
                created_at=T2, expires_at=EXPIRES_FUTURE)])
-    lst = expect_ok(list_authz(c, toks["bob"]), 200).json()["authorizations"]
+    lst = expect_ok(list_authz(c, toks["bob"]), 200)["authorizations"]
     ids = [a["authorization_id"] for a in lst]
     check(ids.index("a_new") < ids.index("a_1"),
           f"newer created_at first (A35/R150): {ids}")
 
 
 def test_r249_statement_money_movements_only(c):
-    toks = hold_fix(c, extra_authz=[
-        fauthz("a_exp", "u_ada", "u_bob", 150, status="open",
-               created_at=T1, expires_at=EXPIRES_PAST)])
+    toks = pfix(c)
     authz = expect_ok(create_authz(c, toks["ada"], "bob", 300, "h249-a"), 201)
     expect_ok(void_authz(c, toks["ada"], authz["authorization_id"]), 200)
     payment_ids = {p["payment_id"] for p in
@@ -246,7 +259,7 @@ def test_r249_statement_money_movements_only(c):
 
 
 def test_r250_capture_appears_once_with_link(c):
-    toks = hold_fix(c)
+    toks = pfix(c)
     authz = expect_ok(create_authz(c, toks["ada"], "bob", 300, "h250-a"), 201)
     cap = expect_ok(capture(c, toks["bob"], authz["authorization_id"], "h250-cap",
                             {"amount": 120, "final": False}), 201)

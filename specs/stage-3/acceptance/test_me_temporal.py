@@ -56,8 +56,8 @@ def test_r165_as_of_inclusive_uncorrected(c):
 
 def test_r165_as_of_same_instant_tie(c):
     toks = sfix(c)
-    eq(me_json(c, toks["cy"], as_of=T2)["balance"], 600,
-       "both same-instant payments included at as_of (R165)")
+    eq(me_json(c, toks["cy"], as_of=T2)["balance"], 500,
+       "both same-instant payments included at as_of (R165); p_s4 at T3 excluded")
     eq(me_json(c, toks["cy"], as_of=shift(T2, -1))["balance"], 0, "before them: opening")
 
 
@@ -133,7 +133,7 @@ def test_a34_corrected_inclusion_governed_by_effective_at(c):
        "as_of between effective_at and created_at INCLUDES the corrected payment (A34)")
     eq(me_json(c, toks["ada"], as_of=shift(T0, -1))["balance"], 10000,
        "before the effective_at: opening (A34)")
-    eq(me_json(c, toks["ada"], as_of=T2)["balance"], 9300,
+    eq(me_json(c, toks["ada"], as_of=T2)["balance"], 9100,
        "as_of at latest selected effective_at == current (R166 via A34)")
     # Forward-dated correction: effective_at AFTER the payment's created_at.
     expect_ok(correct(c, toks["bob"], "p_s2", "a34-k2",
@@ -143,7 +143,8 @@ def test_a34_corrected_inclusion_governed_by_effective_at(c):
        "as_of between created_at and the new effective_at excludes the selected revision (A34)")
     eq(me_json(c, toks["bob"], as_of=T4)["balance"], 10500,
        "as_of at the new effective_at includes it (A34)")
-    eq(get_me(c, toks["bob"])["balance"], 10100, "current reflects selected revision")
+    eq(get_me(c, toks["bob"])["balance"], 10500,
+       "current reflects selected revision (10000 +700 -100 -100)")
 
 
 def test_r202_historical_conservation_grid(c):

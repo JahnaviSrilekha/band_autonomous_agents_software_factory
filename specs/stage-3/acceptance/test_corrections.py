@@ -2,8 +2,9 @@
 revisions endpoint (R178-R206, A32, A33, plus A34 placement)."""
 from client import (
     check, eq, expect_error, expect_ok, fixture, fpayment, get_me, correct,
-    correction_body, revisions_of, revision_keys_ok, statement_ok, make_payment,
-    fuser, RFC3339, T0, T1, T2, T3, FAR_PAST, shift, rfc3339, parse_inst,
+    correction_body, revisions_of, revision_keys_ok, statement_ok, me_json,
+    make_payment, fuser, RFC3339, T0, T1, T2, T3, FAR_PAST, shift, rfc3339,
+    parse_inst,
 )
 
 USERS = [fuser("u_ada", "ada", 9300), fuser("u_bob", "bob", 10100),
@@ -383,6 +384,5 @@ def test_a34_correction_effective_at_before_created_at_accepted(c):
                              correction_body(1, 450, T0, "earlier than created_at")), 201)
     eq(resp["effective_at"], T0, "effective_at unconstrained below created_at (A34/R189)")
     eq(get_me(c, toks["ada"])["balance"], 9350, "current reflects the corrected amount")
-    from client import me_json
     eq(me_json(c, toks["ada"], as_of=T0)["balance"], 9550,
        "historical view at the back-dated instant includes the corrected amount (A34)")
