@@ -114,6 +114,16 @@ def _add_authorization_routes():
 _add_authorization_routes()
 
 
+def _add_revision_routes():
+    from .handlers.revisions import list_revisions
+
+    ROUTES.append(Route("GET", r"^/payments/(?P<id>[^/]+)/revisions$", list_revisions,
+                        auth=True))
+
+
+_add_revision_routes()
+
+
 def _static_page(headers, params):
     from .handlers.page_common import static_file
 
