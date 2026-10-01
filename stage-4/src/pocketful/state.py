@@ -88,12 +88,14 @@ class User:
 
 
 class Revision:
-    def __init__(self, revision, amount, effective_at, recorded_at, reason):
+    def __init__(self, revision, amount, effective_at, recorded_at, reason,
+                 correction_batch_id=None):
         self.revision = revision
         self.amount = amount
         self.effective_at = effective_at
         self.recorded_at = recorded_at
         self.reason = reason
+        self.correction_batch_id = correction_batch_id
 
     def to_json(self):
         return {
@@ -102,6 +104,7 @@ class Revision:
             "effective_at": self.effective_at,
             "recorded_at": self.recorded_at,
             "reason": self.reason,
+            "correction_batch_id": self.correction_batch_id,
         }
 
 
@@ -112,7 +115,7 @@ def make_revision_1(amount, created_at):
 class Payment:
     def __init__(self, id, from_user_id, to_user_id, amount, note, visibility,
                  request_id, settlement_id, effective_at, recorded_at, seq,
-                 authorization_id=None, revisions=None):
+                 authorization_id=None, revisions=None, refund_of=None):
         self.id = id
         self.from_user_id = from_user_id
         self.to_user_id = to_user_id
@@ -124,6 +127,7 @@ class Payment:
         self.recorded_at = recorded_at
         self.seq = seq
         self.authorization_id = authorization_id
+        self.refund_of = refund_of
         self.revisions = (list(revisions) if revisions is not None
                           else [make_revision_1(amount, effective_at)])
 
@@ -131,16 +135,23 @@ class Payment:
     def amount(self):
         return self.revisions[-1].amount
 
-    def append_revision(self, amount, effective_at, recorded_at, reason):
+    def append_revision(self, amount, effective_at, recorded_at, reason,
+                        correction_batch_id=None):
         last = self.revisions[-1]
         recorded_dt = as_dt(recorded_at)
         last_dt = as_dt(last.recorded_at)
         if recorded_dt <= last_dt:
             recorded_dt = last_dt + timedelta(microseconds=1)
             recorded_at = recorded_dt.isoformat()
-        revision = Revision(last.revision + 1, amount, effective_at, recorded_at, reason)
+        revision = Revision(last.revision + 1, amount, effective_at, recorded_at, reason,
+                            correction_batch_id)
         self.revisions.append(revision)
         return revision
+
+
+def refunded_total(state, payment_id):
+    return sum(payment.amount for payment in state.payments
+               if payment.refund_of == payment_id)
 
 
 class Request:
