@@ -265,6 +265,82 @@ class TestT57ConcurrencyHardening(unittest.TestCase):
         for as_of in ("2026-01-01T00:00:00+00:00", "2026-09-20T12:00:00+00:00", now):
             self.assertEqual(self.historical_totals(as_of), SEEDED_TOTAL)
 
+    def test_concurrent_refunds_commit_only_fitting_subset(self):
+        # R262 (amended): five concurrent 150-refunds on a 500 payment — the
+        # cumulative cap under the single critical section commits at most the
+        # fitting subset (450 <= 500 < 600): exactly three 201, two cap failures.
+        target = self.pay(self.ada, "k-target", "bob", 500)
+        barrier = threading.Barrier(5)
+        results = []
+
+        def refund(index):
+            barrier.wait()
+            status, payload, _ = base.request(
+                self.port, "POST", f"/payments/{target}/refunds",
+                body={"amount": 150},
+                headers={**self.bob, "Idempotency-Key": f"cap-refund-{index}"})
+            results.append((status, payload))
+
+        threads = [threading.Thread(target=refund, args=(i,)) for i in range(5)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        created = [status for status, _ in results if status == 201]
+        capped = [payload for status, payload in results if status == 422]
+        self.assertEqual(len(created), 3, results)
+        self.assertEqual(len(capped), 2, results)
+        for payload in capped:
+            self.assertEqual(payload["error"]["code"], "refund_exceeds_payment")
+        self.assertEqual(
+            sum(p.amount for p in state_module.STATE.payments
+                if p.refund_of == target), 450)
+        self.assertEqual(sum(u.balance for u in state_module.STATE.users.values()),
+                         SEEDED_TOTAL)
+
+    def test_refund_vs_correction_race_serialized(self):
+        # R267/R288 (amended): a 400-refund and a correction to 300 race one
+        # 500 payment — either order alone would break the other's floor/cap
+        # check, so exactly one commits and state stays consistent.
+        target = self.pay(self.ada, "k-target", "bob", 500)
+        barrier = threading.Barrier(2)
+        outcomes = {}
+
+        def do_refund():
+            barrier.wait()
+            status, payload, _ = base.request(
+                self.port, "POST", f"/payments/{target}/refunds",
+                body={"amount": 400},
+                headers={**self.bob, "Idempotency-Key": "race-refund"})
+            outcomes["refund"] = status
+
+        def do_correction():
+            barrier.wait()
+            status, payload, _ = base.request(
+                self.port, "POST", f"/payments/{target}/corrections",
+                body={"expected_revision": 1, "amount": 300,
+                      "effective_at": T_NOON, "reason": "race"},
+                headers={**self.ada, "Idempotency-Key": "race-correction"})
+            outcomes["correction"] = status
+
+        threads = [threading.Thread(target=do_refund),
+                   threading.Thread(target=do_correction)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        self.assertEqual(sorted(outcomes.values()), [201, 422])
+        payment = next(p for p in state_module.STATE.payments if p.id == target)
+        refunded = sum(p.amount for p in state_module.STATE.payments
+                       if p.refund_of == target)
+        if outcomes["correction"] == 201:
+            self.assertEqual((len(payment.revisions), refunded), (2, 0))
+        else:
+            self.assertEqual((len(payment.revisions), refunded), (1, 400))
+        self.assertLessEqual(refunded, payment.revisions[-1].amount)
+        self.assertEqual(sum(u.balance for u in state_module.STATE.users.values()),
+                         SEEDED_TOTAL)
+
     def test_replays_survive_the_burst(self):
         p_a1 = self.pay(self.ada, "k-a1", "bob", 100)
         # fire a mixed mini-burst, then replay pre-batch keys
