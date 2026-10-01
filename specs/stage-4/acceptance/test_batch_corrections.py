@@ -241,15 +241,17 @@ def test_r277_identical_instants_offsets_may_differ(c):
                                           transfer("bob", "cy", 200)], "st-1"), 201)
     m1, m2 = (p["payment_id"] for p in st["payments"])
     # Same instant, different offset spellings: accepted.
-    z_spelling = "2026-09-01T13:00:00+02:00"  # == T1 (11:00+00:00)
+    z_spelling = "2026-09-01T12:00:00+02:00"  # == T1 (10:00+00:00)
     r = expect_ok(correction_batch(c, toks["op"], "b-off",
                                    [batch_item(m1, 1, 310, T1),
                                     batch_item(m2, 1, 210, z_spelling)]), 201)
     eq(len(r["revisions"]), 2, "offset spellings of one instant accepted (R277)")
-    # Different instants: 422 validation_failed.
+    # Different instants: 422 validation_failed. (Both members are at revision 2
+    # after the accepted batch above; step-1 staleness precedes step-2
+    # consistency, so stale revisions here would mask the R277 error.)
     expect_error(correction_batch(c, toks["op"], "b-off-2",
-                                  [batch_item(m1, 1, 320, T1),
-                                   batch_item(m2, 1, 220, T2)]),
+                                  [batch_item(m1, 2, 320, T1),
+                                   batch_item(m2, 2, 220, T2)]),
                  422, "validation_failed", "differing instants rejected (R277)")
 
 

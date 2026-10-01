@@ -317,7 +317,10 @@ def test_r290_export_v4(c):
     payments = {p["id"]: p for p in exp["state"]["payments"]}
     for pid, p in payments.items():
         check("refund_of" in p, f"payment {pid} carries refund_of (R290)")
-    eq(payments["p2"]["refund_of"], ref["payment_id"], "refund_of exported (R290)")
+    eq(payments[ref["payment_id"]]["refund_of"], "p2",
+       "refund payment carries its target's id in the export (R290/R264)")
+    eq(payments["p2"]["refund_of"], None,
+       "non-refund payments' refund_of null (R264)")
     eq(payments["p1"]["refund_of"], None, "ordinary refund_of null (R290)")
     revs = payments["p1"]["revisions"]
     eq([r["revision"] for r in revs], [1, 2, 3], "revision history exported")
