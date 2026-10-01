@@ -352,6 +352,78 @@ def check_correction_funds(state, payment, new_amount, effective_dt, now):
     _check_historical_overdraft(state, payment, new_amount, effective_dt, now)
 
 
+def check_batch_current_funds(state, proposals, now):
+    from .errors import ApiError
+
+    deltas = {}
+    for payment, new_amount, _effective_dt in proposals:
+        delta = new_amount - payment.revisions[-1].amount
+        if delta == 0:
+            continue
+        deltas[payment.from_user_id] = deltas.get(payment.from_user_id, 0) - delta
+        deltas[payment.to_user_id] = deltas.get(payment.to_user_id, 0) + delta
+    for user_id, delta in deltas.items():
+        if delta < 0 and available(state, user_id, now) + delta < 0:
+            raise ApiError(409, "insufficient_funds",
+                           "batch correction debits exceed the debtor's available funds")
+
+
+def check_batch_historical_funds(state, proposals, now):
+    from .errors import ApiError
+
+    parties = set()
+    proposed = {}
+    for payment, new_amount, effective_dt in proposals:
+        parties.add(payment.from_user_id)
+        parties.add(payment.to_user_id)
+        proposed[payment.id] = (new_amount, effective_dt)
+    movements = {user_id: {} for user_id in parties}
+    for other in state.payments:
+        if other.from_user_id not in parties and other.to_user_id not in parties:
+            continue
+        if other.id in proposed:
+            amount, instant = proposed[other.id]
+        else:
+            revision = selected_revision(other, None)
+            if revision is None:
+                continue
+            instant = as_dt(revision.effective_at)
+            amount = revision.amount
+        if instant > now:
+            continue
+        if other.from_user_id in movements:
+            movements[other.from_user_id][instant] = (
+                movements[other.from_user_id].get(instant, 0) - amount)
+        if other.to_user_id in movements:
+            movements[other.to_user_id][instant] = (
+                movements[other.to_user_id].get(instant, 0) + amount)
+    running = {user_id: state.users[user_id].opening_balance for user_id in parties}
+    if any(value < 0 for value in running.values()):
+        raise ApiError(409, "historical_overdraft",
+                       "batch correction would overdraw a historical balance")
+    instants = {instant for per_user in movements.values() for instant in per_user}
+    for auth in state.authorizations.values():
+        if auth.from_user_id not in parties:
+            continue
+        if as_dt(auth.created_dt) <= now:
+            instants.add(as_dt(auth.created_dt))
+        if auth.closed_event_dt is not None and auth.closed_event_dt <= now:
+            instants.add(auth.closed_event_dt)
+        if auth.status == "open" and auth.expires_dt <= now:
+            instants.add(auth.expires_dt)
+    for instant in sorted(instants):
+        for user_id in parties:
+            running[user_id] += movements[user_id].get(instant, 0)
+        for user_id in parties:
+            total = running[user_id]
+            if total < 0:
+                raise ApiError(409, "historical_overdraft",
+                               "batch correction would overdraw a historical balance")
+            if total - historical_held(state, user_id, instant) < 0:
+                raise ApiError(409, "historical_overdraft",
+                               "batch correction would overdraw a historical availability")
+
+
 def _check_historical_overdraft(state, payment, new_amount, effective_dt, now):
     from .errors import ApiError
 

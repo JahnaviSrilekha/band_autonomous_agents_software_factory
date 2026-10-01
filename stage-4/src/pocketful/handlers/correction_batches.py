@@ -65,6 +65,39 @@ def correction_item_json(item):
     }
 
 
+def check_settlement_completeness(state, items):
+    item_payment_ids = {item["payment"].id for item in items}
+    settlements_checked = set()
+    for item in items:
+        settlement_id = item["payment"].settlement_id
+        if settlement_id is None or settlement_id in settlements_checked:
+            continue
+        settlements_checked.add(settlement_id)
+        settlement = state.settlements.get(settlement_id)
+        if settlement is None:
+            raise ApiError(422, "incomplete_settlement",
+                           "settlement members must all be corrected together")
+        for member_id in settlement.payment_ids:
+            if member_id not in item_payment_ids:
+                raise ApiError(422, "incomplete_settlement",
+                               "settlement members must all be corrected together")
+
+
+def check_members_effective_consistency(items):
+    by_settlement = {}
+    for item in items:
+        settlement_id = item["payment"].settlement_id
+        if settlement_id is None:
+            continue
+        by_settlement.setdefault(settlement_id, []).append(item)
+    for members in by_settlement.values():
+        first_dt = members[0]["effective_dt"]
+        for member in members[1:]:
+            if member["effective_dt"] != first_dt:
+                raise ApiError(422, "validation_failed",
+                               "settlement members must share one effective instant")
+
+
 def create_correction_batch(user, body, params, query):
     with STATE_LOCK:
         state = state_module.STATE
@@ -72,6 +105,13 @@ def create_correction_batch(user, body, params, query):
         if fresh is None:
             raise ApiError(401, "unauthenticated", "session no longer valid")
         items = _parse_items(state, body)
+        check_settlement_completeness(state, items)
+        check_members_effective_consistency(items)
+        now = state_module.now_dt()
+        proposals = [(item["payment"], item["amount"], item["effective_dt"])
+                     for item in items]
+        state_module.check_batch_current_funds(state, proposals, now)
+        state_module.check_batch_historical_funds(state, proposals, now)
         batch_id = new_id("cb")
         recorded_at = state_module.compute_batch_recorded_at(
             state, [item["payment"] for item in items])
