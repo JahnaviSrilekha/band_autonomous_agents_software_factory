@@ -10,9 +10,9 @@ FIXTURE = {
         {"id": "u_ada", "email": "ada@example.com", "password": "correct horse",
          "display_name": "Ada", "handle": "ada", "balance": 10000},
         {"id": "u_bob", "email": "bob@example.com", "password": "correct horse",
-         "display_name": "Bob", "handle": "bob", "balance": 0},
+         "display_name": "Bob", "handle": "bob", "balance": 500},
         {"id": "u_cy", "email": "cy@example.com", "password": "correct horse",
-         "display_name": "Cy", "handle": "cy", "balance": 0},
+         "display_name": "Cy", "handle": "cy", "balance": 300},
     ],
     "payments": [
         {"id": "p_seed_pub", "from_user_id": "u_ada", "to_user_id": "u_bob",

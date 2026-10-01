@@ -5,7 +5,7 @@ from .errors import ApiError
 from . import state as state_module
 from .state import (
     AUTHORIZATION_STATUSES, STATE_LOCK, Authorization, Payment, Request, State, User,
-    hash_password, parse_rfc3339,
+    as_dt, hash_password, parse_rfc3339,
 )
 
 HANDLE_RE = re.compile(r"^[a-z0-9_]{1,20}$")
@@ -59,12 +59,11 @@ def _fixture_ttl(fixture):
     return ttl
 
 
-def _seed_authorizations(state, fixture):
+def _seed_authorizations(state, fixture, reset_now):
     authorizations = fixture.get("authorizations", [])
     if not isinstance(authorizations, list):
         raise ApiError(422, "validation_failed", "authorizations must be an array")
-    stamp = state_module.now_iso()
-    reset_now = state_module.now_dt()
+    stamp = reset_now.isoformat()
     for entry in authorizations:
         if not isinstance(entry, dict):
             raise ApiError(422, "validation_failed", "each seeded authorization must be an object")
@@ -140,11 +139,15 @@ def _check_hold_sum(state):
 def build_state_from_fixture(fixture):
     state = _build_users(fixture)
     state.authorization_ttl_seconds = _fixture_ttl(fixture)
-    _seed_payments(state, fixture)
-    _seed_requests(state, fixture)
+    reset_now = state_module.now_dt()
+    _seed_payments(state, fixture, reset_now)
+    _apply_seeded_opening_balances(state)
+    _check_seeded_history(state)
+    _seed_requests(state, fixture, reset_now)
     _seed_operators(state, fixture)
-    _seed_authorizations(state, fixture)
+    _seed_authorizations(state, fixture, reset_now)
     _check_hold_sum(state)
+    state.reset_epoch += 1
     return state
 
 
@@ -185,11 +188,11 @@ def _build_users(fixture):
     return state
 
 
-def _seed_payments(state, fixture):
+def _seed_payments(state, fixture, reset_now):
     payments = fixture.get("payments", [])
     if not isinstance(payments, list):
         raise ApiError(422, "validation_failed", "payments must be an array")
-    stamp = state_module.now_iso()
+    stamp = reset_now.isoformat()
     for entry in payments:
         if not isinstance(entry, dict):
             raise ApiError(422, "validation_failed", "each seeded payment must be an object")
@@ -199,6 +202,14 @@ def _seed_payments(state, fixture):
         if from_user_id not in state.users or to_user_id not in state.users:
             raise ApiError(422, "validation_failed", "seeded payment references an unknown user")
         amount = _fixture_amount(entry.get("amount"), 0, "seeded payment amount")
+        created_at = entry.get("created_at")
+        if created_at is None:
+            created_at = stamp
+        else:
+            created_dt = parse_rfc3339(created_at, "seeded payment created_at", require_offset=True)
+            if created_dt > reset_now:
+                raise ApiError(422, "validation_failed",
+                               "seeded payment created_at must not be in the future")
         payment = Payment(
             id=payment_id,
             from_user_id=from_user_id,
@@ -208,18 +219,41 @@ def _seed_payments(state, fixture):
             visibility=_fixture_visibility(entry),
             request_id=None,
             settlement_id=None,
-            effective_at=stamp,
-            recorded_at=stamp,
+            effective_at=created_at,
+            recorded_at=created_at,
             seq=state.next_seq(),
         )
         state.payments.append(payment)
 
 
-def _seed_requests(state, fixture):
+def _apply_seeded_opening_balances(state):
+    net = {user_id: 0 for user_id in state.users}
+    for payment in state.payments:
+        net[payment.from_user_id] -= payment.amount
+        net[payment.to_user_id] += payment.amount
+    for user_id, user in state.users.items():
+        user.opening_balance = user.balance - net[user_id]
+
+
+def _check_seeded_history(state):
+    running = {user_id: user.opening_balance for user_id, user in state.users.items()}
+    if any(value < 0 for value in running.values()):
+        raise ApiError(422, "validation_failed",
+                       "seeded payment history would overdraw an account")
+    ordered = sorted(state.payments, key=lambda p: (as_dt(p.effective_at), p.seq))
+    for payment in ordered:
+        running[payment.from_user_id] -= payment.amount
+        running[payment.to_user_id] += payment.amount
+        if running[payment.from_user_id] < 0 or running[payment.to_user_id] < 0:
+            raise ApiError(422, "validation_failed",
+                           "seeded payment history would overdraw an account")
+
+
+def _seed_requests(state, fixture, reset_now):
     requests = fixture.get("requests", [])
     if not isinstance(requests, list):
         raise ApiError(422, "validation_failed", "requests must be an array")
-    stamp = state_module.now_iso()
+    stamp = reset_now.isoformat()
     for entry in requests:
         if not isinstance(entry, dict):
             raise ApiError(422, "validation_failed", "each seeded request must be an object")

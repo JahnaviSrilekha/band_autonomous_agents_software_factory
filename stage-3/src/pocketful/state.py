@@ -3,7 +3,7 @@ import hmac
 import os
 import threading
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 STATE_LOCK = threading.RLock()
 
@@ -20,7 +20,7 @@ def now_dt():
     return datetime.now(timezone.utc)
 
 
-def parse_rfc3339(value, what="timestamp"):
+def parse_rfc3339(value, what="timestamp", require_offset=False):
     from .errors import ApiError
 
     if not isinstance(value, str) or not value:
@@ -31,8 +31,16 @@ def parse_rfc3339(value, what="timestamp"):
     except ValueError:
         raise ApiError(422, "validation_failed", f"{what} must be an RFC 3339 timestamp")
     if parsed.tzinfo is None:
+        if require_offset:
+            raise ApiError(422, "validation_failed", f"{what} must include a UTC offset")
         parsed = parsed.replace(tzinfo=timezone.utc)
     return parsed
+
+
+def as_dt(value):
+    if isinstance(value, datetime):
+        return value
+    return parse_rfc3339(value)
 
 
 def new_id(prefix):
@@ -68,23 +76,46 @@ def verify_password(stored, password):
 
 
 class User:
-    def __init__(self, id, email, password_hash, display_name, handle, balance):
+    def __init__(self, id, email, password_hash, display_name, handle, balance,
+                 opening_balance=None):
         self.id = id
         self.email = email
         self.password_hash = password_hash
         self.display_name = display_name
         self.handle = handle
         self.balance = balance
+        self.opening_balance = balance if opening_balance is None else opening_balance
+
+
+class Revision:
+    def __init__(self, revision, amount, effective_at, recorded_at, reason):
+        self.revision = revision
+        self.amount = amount
+        self.effective_at = effective_at
+        self.recorded_at = recorded_at
+        self.reason = reason
+
+    def to_json(self):
+        return {
+            "revision": self.revision,
+            "amount": self.amount,
+            "effective_at": self.effective_at,
+            "recorded_at": self.recorded_at,
+            "reason": self.reason,
+        }
+
+
+def make_revision_1(amount, created_at):
+    return Revision(1, amount, created_at, created_at, "")
 
 
 class Payment:
     def __init__(self, id, from_user_id, to_user_id, amount, note, visibility,
                  request_id, settlement_id, effective_at, recorded_at, seq,
-                 authorization_id=None):
+                 authorization_id=None, revisions=None):
         self.id = id
         self.from_user_id = from_user_id
         self.to_user_id = to_user_id
-        self.amount = amount
         self.note = note
         self.visibility = visibility
         self.request_id = request_id
@@ -93,6 +124,23 @@ class Payment:
         self.recorded_at = recorded_at
         self.seq = seq
         self.authorization_id = authorization_id
+        self.revisions = (list(revisions) if revisions is not None
+                          else [make_revision_1(amount, effective_at)])
+
+    @property
+    def amount(self):
+        return self.revisions[-1].amount
+
+    def append_revision(self, amount, effective_at, recorded_at, reason):
+        last = self.revisions[-1]
+        recorded_dt = as_dt(recorded_at)
+        last_dt = as_dt(last.recorded_at)
+        if recorded_dt <= last_dt:
+            recorded_dt = last_dt + timedelta(microseconds=1)
+            recorded_at = recorded_dt.isoformat()
+        revision = Revision(last.revision + 1, amount, effective_at, recorded_at, reason)
+        self.revisions.append(revision)
+        return revision
 
 
 class Request:
@@ -211,6 +259,8 @@ class State:
         self.settlements = {}
         self.authorizations = {}
         self.idempotency = {}
+        self.statement_snapshots = {}
+        self.reset_epoch = 0
         self.seq = 0
 
     def next_seq(self):
