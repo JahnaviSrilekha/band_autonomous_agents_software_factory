@@ -154,6 +154,10 @@ def refunded_total(state, payment_id):
                if payment.refund_of == payment_id)
 
 
+def _is_correction_immutable(payment):
+    return payment.authorization_id is not None or payment.refund_of is not None
+
+
 class Request:
     def __init__(self, id, requester_id, payer_id, amount, note, status, payment_id,
                  created_at, seq):

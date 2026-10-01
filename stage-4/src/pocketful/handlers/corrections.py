@@ -2,7 +2,7 @@ import math
 
 from ..errors import ApiError
 from .. import state as state_module
-from ..state import STATE_LOCK, parse_rfc3339
+from ..state import STATE_LOCK, _is_correction_immutable, parse_rfc3339
 
 
 def _find_payment(state, payment_id):
@@ -95,7 +95,7 @@ def create_correction(user, body, params, query):
         if payment.from_user_id != fresh.id:
             raise ApiError(403, "forbidden",
                            "only the original sender may correct a payment")
-        if payment.settlement_id is not None or payment.authorization_id is not None:
+        if payment.settlement_id is not None or _is_correction_immutable(payment):
             raise ApiError(422, "linked_payment_immutable",
                            "linked payments cannot be corrected")
         expected_revision = _parse_expected_revision(body)
@@ -105,6 +105,9 @@ def create_correction(user, body, params, query):
         if expected_revision != len(payment.revisions):
             raise ApiError(409, "stale_revision",
                            "expected_revision does not match the payment's latest revision")
+        if state_module.refunded_total(state, payment.id) > amount:
+            raise ApiError(422, "refund_exceeds_payment",
+                           "amount would reduce the payment below its refunded total")
         state_module.check_correction_funds(state, payment, amount, effective_dt,
                                             state_module.now_dt())
         old_amount = payment.revisions[-1].amount
