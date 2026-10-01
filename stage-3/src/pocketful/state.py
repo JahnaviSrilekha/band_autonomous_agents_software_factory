@@ -200,7 +200,7 @@ AUTHORIZATION_STATUSES = ("open", "captured", "voided", "expired")
 class Authorization:
     def __init__(self, id, from_user_id, to_user_id, amount, note, visibility, status,
                  captured_amount, payment_ids, created_at, expires_at, expires_dt,
-                 created_dt=None, seq=0):
+                 created_dt=None, seq=0, closed_event_dt=None):
         self.id = id
         self.from_user_id = from_user_id
         self.to_user_id = to_user_id
@@ -215,6 +215,7 @@ class Authorization:
         self.expires_at = expires_at
         self.expires_dt = expires_dt
         self.seq = seq
+        self.closed_event_dt = closed_event_dt
 
 
 def is_live_hold(auth, now):
@@ -237,6 +238,52 @@ def held(state, user_id, now):
     return sum(a.amount - a.captured_amount
                for a in state.authorizations.values()
                if a.from_user_id == user_id and is_live_hold(a, now))
+
+
+def _known_close_instant(auth, known):
+    if auth.status in ("captured", "voided"):
+        event = auth.closed_event_dt
+        if event is None:
+            return None
+        if known is None or event <= known:
+            return event
+        return None
+    return None
+
+
+def is_live_hold_at(auth, at, known_at=None):
+    at_dt = as_dt(at)
+    known = as_dt(known_at) if known_at is not None else None
+    created = as_dt(auth.created_dt)
+    if known is not None and created > known:
+        return False
+    if created > at_dt:
+        return False
+    close = _known_close_instant(auth, known)
+    if close is None:
+        return at_dt < auth.expires_dt
+    return at_dt < close
+
+
+def historical_held(state, user_id, at, known_at=None):
+    at_dt = as_dt(at)
+    known = as_dt(known_at) if known_at is not None else None
+    total = 0
+    for auth in state.authorizations.values():
+        if auth.from_user_id != user_id:
+            continue
+        if not is_live_hold_at(auth, at_dt, known):
+            continue
+        captured = 0
+        for payment in state.payments:
+            if payment.authorization_id != auth.id:
+                continue
+            if known is not None and as_dt(payment.recorded_at) > known:
+                continue
+            if as_dt(payment.effective_at) <= at_dt:
+                captured += payment.amount
+        total += auth.amount - captured
+    return total
 
 
 def available(state, user_id, now):
@@ -308,13 +355,27 @@ def _check_historical_overdraft(state, payment, new_amount, effective_dt, now):
     if any(value < 0 for value in running.values()):
         raise ApiError(409, "historical_overdraft",
                        "correction would overdraw a historical balance")
-    instants = sorted({instant for per_user in movements.values() for instant in per_user})
-    for instant in instants:
+    instants = {instant for per_user in movements.values() for instant in per_user}
+    for auth in state.authorizations.values():
+        if auth.from_user_id not in parties:
+            continue
+        if as_dt(auth.created_dt) <= now:
+            instants.add(as_dt(auth.created_dt))
+        if auth.closed_event_dt is not None and auth.closed_event_dt <= now:
+            instants.add(auth.closed_event_dt)
+        if auth.status == "open" and auth.expires_dt <= now:
+            instants.add(auth.expires_dt)
+    for instant in sorted(instants):
         for user_id in parties:
             running[user_id] += movements[user_id].get(instant, 0)
-        if any(value < 0 for value in running.values()):
-            raise ApiError(409, "historical_overdraft",
-                           "correction would overdraw a historical balance")
+        for user_id in parties:
+            total = running[user_id]
+            if total < 0:
+                raise ApiError(409, "historical_overdraft",
+                               "correction would overdraw a historical balance")
+            if total - historical_held(state, user_id, instant) < 0:
+                raise ApiError(409, "historical_overdraft",
+                               "correction would overdraw a historical availability")
 
 
 class State:
