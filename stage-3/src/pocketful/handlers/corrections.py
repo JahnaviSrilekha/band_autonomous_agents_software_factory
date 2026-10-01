@@ -101,10 +101,12 @@ def create_correction(user, body, params, query):
         expected_revision = _parse_expected_revision(body)
         amount = _parse_amount(body)
         _parse_reason(body)
-        effective_at, _effective_dt = _parse_effective_at(body)
+        effective_at, effective_dt = _parse_effective_at(body)
         if expected_revision != len(payment.revisions):
             raise ApiError(409, "stale_revision",
                            "expected_revision does not match the payment's latest revision")
+        state_module.check_correction_funds(state, payment, amount, effective_dt,
+                                            state_module.now_dt())
         old_amount = payment.revisions[-1].amount
         revision = payment.append_revision(amount, effective_at, state_module.now_iso(),
                                            body["reason"])

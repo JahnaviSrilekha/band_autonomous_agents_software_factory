@@ -243,6 +243,80 @@ def available(state, user_id, now):
     return state.users[user_id].balance - held(state, user_id, now)
 
 
+def selected_revision(payment, known_at):
+    if known_at is None:
+        return payment.revisions[-1]
+    eligible = [r for r in payment.revisions if as_dt(r.recorded_at) <= known_at]
+    return eligible[-1] if eligible else None
+
+
+def historical_balance(state, user_id, as_of, known_at=None, inclusive=True):
+    user = state.users.get(user_id)
+    if user is None:
+        return 0
+    balance = user.opening_balance
+    for payment in state.payments:
+        if payment.from_user_id != user_id and payment.to_user_id != user_id:
+            continue
+        revision = selected_revision(payment, known_at)
+        if revision is None:
+            continue
+        effective = as_dt(revision.effective_at)
+        if effective > as_of or (not inclusive and effective >= as_of):
+            continue
+        balance += revision.amount if payment.to_user_id == user_id else -revision.amount
+    return balance
+
+
+def check_correction_funds(state, payment, new_amount, effective_dt, now):
+    from .errors import ApiError
+
+    old_amount = payment.revisions[-1].amount
+    delta = new_amount - old_amount
+    if delta != 0:
+        debtor = payment.from_user_id if delta > 0 else payment.to_user_id
+        if available(state, debtor, now) < abs(delta):
+            raise ApiError(409, "insufficient_funds",
+                           "correction debit exceeds the debtor's available funds")
+    _check_historical_overdraft(state, payment, new_amount, effective_dt, now)
+
+
+def _check_historical_overdraft(state, payment, new_amount, effective_dt, now):
+    from .errors import ApiError
+
+    parties = (payment.from_user_id, payment.to_user_id)
+    movements = {user_id: {} for user_id in parties}
+    for other in state.payments:
+        if other.from_user_id not in parties and other.to_user_id not in parties:
+            continue
+        if other.id == payment.id:
+            instant = effective_dt
+            amount = new_amount
+        else:
+            revision = selected_revision(other, None)
+            if revision is None:
+                continue
+            instant = as_dt(revision.effective_at)
+            amount = revision.amount
+        if instant > now:
+            continue
+        movements[other.from_user_id][instant] = (
+            movements[other.from_user_id].get(instant, 0) - amount)
+        movements[other.to_user_id][instant] = (
+            movements[other.to_user_id].get(instant, 0) + amount)
+    running = {user_id: state.users[user_id].opening_balance for user_id in parties}
+    if any(value < 0 for value in running.values()):
+        raise ApiError(409, "historical_overdraft",
+                       "correction would overdraw a historical balance")
+    instants = sorted({instant for per_user in movements.values() for instant in per_user})
+    for instant in instants:
+        for user_id in parties:
+            running[user_id] += movements[user_id].get(instant, 0)
+        if any(value < 0 for value in running.values()):
+            raise ApiError(409, "historical_overdraft",
+                           "correction would overdraw a historical balance")
+
+
 class State:
     def __init__(self):
         self.currency = "EUR"

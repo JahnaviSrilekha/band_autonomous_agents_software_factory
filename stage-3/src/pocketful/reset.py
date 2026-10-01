@@ -240,11 +240,14 @@ def _check_seeded_history(state):
     if any(value < 0 for value in running.values()):
         raise ApiError(422, "validation_failed",
                        "seeded payment history would overdraw an account")
-    ordered = sorted(state.payments, key=lambda p: (as_dt(p.effective_at), p.seq))
-    for payment in ordered:
-        running[payment.from_user_id] -= payment.amount
-        running[payment.to_user_id] += payment.amount
-        if running[payment.from_user_id] < 0 or running[payment.to_user_id] < 0:
+    by_instant = {}
+    for payment in state.payments:
+        by_instant.setdefault(as_dt(payment.effective_at), []).append(payment)
+    for instant in sorted(by_instant):
+        for payment in by_instant[instant]:
+            running[payment.from_user_id] -= payment.amount
+            running[payment.to_user_id] += payment.amount
+        if any(value < 0 for value in running.values()):
             raise ApiError(422, "validation_failed",
                            "seeded payment history would overdraw an account")
 

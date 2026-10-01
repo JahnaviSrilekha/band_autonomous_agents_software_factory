@@ -10,7 +10,7 @@ FIXTURE = {
     "settlement_operator_ids": ["u_ada"],
     "users": [
         {"id": "u_ada", "email": "ada@example.com", "password": "correct horse",
-         "display_name": "Ada", "handle": "ada", "balance": 10000},
+         "display_name": "Ada", "handle": "ada", "balance": 2000000000},
         {"id": "u_bob", "email": "bob@example.com", "password": "correct horse",
          "display_name": "Bob", "handle": "bob", "balance": 2500},
         {"id": "u_cy", "email": "cy@example.com", "password": "correct horse",
