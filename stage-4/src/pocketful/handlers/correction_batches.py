@@ -40,12 +40,12 @@ def _parse_items(state, body):
         if _is_correction_immutable(payment):
             raise ApiError(422, "linked_payment_immutable",
                            "captured and refund payments cannot be corrected")
-        if state_module.refunded_total(state, payment.id) > amount:
-            raise ApiError(422, "refund_exceeds_payment",
-                           "amount would reduce the payment below its refunded total")
         if expected_revision != len(payment.revisions):
             raise ApiError(409, "stale_revision",
                            "expected_revision does not match the payment's latest revision")
+        if state_module.refunded_total(state, payment.id) > amount:
+            raise ApiError(422, "refund_exceeds_payment",
+                           "amount would reduce the payment below its refunded total")
         items.append({"payment": payment, "amount": amount, "reason": reason,
                       "effective_at": effective_at, "effective_dt": effective_dt,
                       "revision": None})
