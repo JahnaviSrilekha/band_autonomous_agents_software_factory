@@ -22,8 +22,12 @@ values: behaviour, error, limit, concurrency, retry, time, compatibility, interf
 ## Refunds — request, authorization and target validation
 
 - **R253** (interface, retry). "`POST /payments/{payment_id}/refunds`, body `{"amount": 200}`,
-  requires an idempotency key." — Acceptance: the route requires the `Idempotency-Key` header
-  under the stage-1 §7 rule (missing/empty → 400 `missing_idempotency_key`).
+  requires an idempotency key." — Acceptance: the route requires a valid bearer token (401
+  `unauthenticated` for a missing/invalid token, stage-1 R54's auth gate) before the
+  `Idempotency-Key` header check (missing/empty → 400 `missing_idempotency_key`, stage-1 §7),
+  both checked before any handler-level resource/body check (404 R254, 403 R255, 422, 409) —
+  the same auth-then-key-then-handler order as every other idempotent route (tester completeness
+  review round 1, items 1-2).
 - **R254** (error). "Unknown payment is 404." — Acceptance: a `payment_id` that does not exist
   (or is not visible to the caller, same "unknown" convention as stage-1/3) is 404 `not_found`,
   checked before the receiver-identity check (A39).
@@ -66,7 +70,13 @@ values: behaviour, error, limit, concurrency, retry, time, compatibility, interf
   single global critical section, if `available(target.to_user_id)` at commit time is less than
   the refund amount, return 409 `insufficient_funds` with no state change; otherwise debit
   `target.to_user_id.balance` and credit `target.from_user_id.balance` by the amount, create the
-  refund payment, and commit the idempotency record, all in the same atomic step.
+  refund payment, and commit the idempotency record, all in the same atomic step. Under
+  concurrent refund attempts against the same target whose combined amounts would exceed either
+  the cumulative cap (R259) or available funds, at most the subset that fits commits — e.g. two
+  concurrent refunds that together exceed the cap: exactly one succeeds, the other gets 422
+  `refund_exceeds_payment` or 409 `insufficient_funds` depending on which check it fails after
+  losing the race under the single global critical section, never both succeeding to
+  over-refund (tester completeness review round 1, item 3).
 - **R263** (behaviour). "Refunds never reopen a request or authorization or restore a released
   hold." — Acceptance: refunding a request-linked or capture-linked payment leaves the
   originating `Request.status` and `Authorization.status`/`captured_amount`/`payment_ids`
@@ -87,11 +97,14 @@ values: behaviour, error, limit, concurrency, retry, time, compatibility, interf
   `linked_payment_immutable`." — Acceptance: `POST /payments/{id}/corrections` on a payment with
   `authorization_id != null` OR `refund_of != null` is rejected 422 `linked_payment_immutable`
   (extends stage-3's existing `authorization_id` check to also cover `refund_of`).
-- **R267** (limit, error). "A correction cannot reduce a payment below its already-refunded
-  amount: 422 `refund_exceeds_payment`." — Acceptance: a correction whose new `amount` is less
-  than the sum of refunds already issued against that payment is rejected 422
+- **R267** (limit, error, concurrency). "A correction cannot reduce a payment below its
+  already-refunded amount: 422 `refund_exceeds_payment`." — Acceptance: a correction whose new
+  `amount` is less than the sum of refunds already issued against that payment is rejected 422
   `refund_exceeds_payment`, state unchanged; this applies to both the single-correction endpoint
-  and every item of a correction batch.
+  and every item of a correction batch. Under a concurrent refund and correction racing the same
+  payment, the single global critical section (R288) serializes them: whichever commits first is
+  reflected in the other's check — neither can observe a half-applied state of the other (tester
+  completeness review round 1, item 3).
 - **R268** (behaviour). "Correction debits are checked against available funds." — Acceptance:
   reaffirms stage-3's `check_correction_funds` (R197/R199) continues to gate every correction
   (single or batched) after refunds exist, using the debtor's available funds at commit time,
@@ -104,7 +117,10 @@ values: behaviour, error, limit, concurrency, retry, time, compatibility, interf
   requires `Idempotency-Key` (R252-style) and a bearer token for a user in
   `settlement_operator_ids`; no/invalid token is 401 `unauthenticated`; an authenticated
   non-operator is 403 `forbidden` — checked at the same point in the request pipeline as
-  `/settlements` (route-level `operator=True`, before body validation; A46).
+  `/settlements` (route-level `operator=True`, before body validation; A46). The full
+  route-level order is 401 (missing/invalid token) → 403 (authenticated non-operator) → 400
+  `missing_idempotency_key` → handler-level item/body validation (R270-R274) — identical order
+  to `/settlements` (tester completeness review round 1, items 1-2).
 - **R270** (limit, error). "corrections contains 1..32 objects with distinct payment_ids, else
   422 `validation_failed`." — Acceptance: `body.corrections` must be a JSON array of 1 to 32
   objects; fewer, more, a non-array, or any two objects sharing the same `payment_id` is 422
@@ -206,7 +222,10 @@ values: behaviour, error, limit, concurrency, retry, time, compatibility, interf
   both succeed." — Acceptance: under concurrent single-correction and/or batch-correction
   requests that name the same `payment_id` with the same `expected_revision`, exactly one
   commits (the others get 409 `stale_revision`), proven under the single global critical section
-  (design.md).
+  (design.md). This serialization also governs concurrent refund-vs-correction races on one
+  payment (R267): both paths acquire the same `STATE_LOCK` for their full validate-then-commit
+  section, so one always completes before the other even begins its checks (tester completeness
+  review round 1, item 3).
 - **R289** (compatibility, interface). "A stage-4 service must accept exports produced by the
   same team's stages 1–3, retaining settlement membership, corrections and snapshots." —
   Acceptance: `POST /_test/import` accepts `format_version` 1, 2 and 3 (unchanged stage-3
