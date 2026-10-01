@@ -148,6 +148,36 @@ def has_label(root, control, what):
                        f"has no associated label")
 
 
+def is_hidden(el):
+    """R105/R107/R155 'shown instead of the list' is a visibility statement:
+    absent, `hidden`, a *hidden* class, or display/visibility:none all count
+    as not shown; an unhidden element counts as shown."""
+    if el is None:
+        return True
+    if el.attr("hidden") is not None:
+        return True
+    classes = (el.attr("class") or "").split()
+    if any(c == "hidden" or c.startswith("is-hidden") or c.endswith("--hidden")
+           for c in classes):
+        return True
+    style = (el.attr("style") or "").replace(" ", "").lower()
+    return "display:none" in style or "visibility:hidden" in style
+
+
+def assert_shown(root, testid, what):
+    el = root.find_testid(testid)
+    check(el is not None, f"{what}: missing [data-testid={testid}]")
+    check(not is_hidden(el),
+          f"{what}: [data-testid={testid}] is present but hidden")
+
+
+def assert_not_shown(root, testid, what):
+    el = root.find_testid(testid)
+    if el is not None:
+        check(is_hidden(el),
+              f"{what}: [data-testid={testid}] must not be shown here")
+
+
 def anchors(root):
     return [el.attr("href") or "" for el in root.iter() if el.tag == "a"]
 

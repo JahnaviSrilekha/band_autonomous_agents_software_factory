@@ -83,8 +83,8 @@ def test_r128_splits_unchanged_no_balance_check(c):
         "amount": 999, "participant_handles": ["cy", "ada", "bob"]},
         token=toks["cy"], headers={"Idempotency-Key": "k-sp1"}), 201,
         "split from a zero-balance caller (stage-1 R74, unchanged R128)")
-    eq([s["amount"] for s in sp["shares"]], [334, 333, 332],
-       "stage-1 §9 rounding rule unchanged (R128)")
+    eq([s["amount"] for s in sp["shares"]], [333, 333, 333],
+       "stage-1 §9 rounding rule unchanged (R128): 999/3 divides exactly")
     eq(len(sp["requests"]), 2, "one request per participant except caller")
 
 

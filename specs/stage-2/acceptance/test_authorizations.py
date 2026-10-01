@@ -6,7 +6,7 @@ from datetime import datetime
 
 from client import (
     SuiteFailure, check, eq, expect_error, expect_ok, get_me, rfc3339, fauthz,
-    STANDARD_USERS, PAYMENT_KEYS, ME_KEYS, AUTHZ_KEYS,
+    fuser, STANDARD_USERS, PAYMENT_KEYS, ME_KEYS, AUTHZ_KEYS,
     afresh, capture, create_authz, list_authz, void_authz,
     get_authz_list, make_payment,
 )
@@ -228,15 +228,23 @@ def test_r140_case_table(c):
     expect_error(r, 400, "malformed_request", "to_handle wrong JSON type")
     expect_ok(make_payment(c, toks["ada"], "bob", 1, "k-f14"), 201,
               "amount 1 is valid (boundary)")
-    expect_ok(create_authz(c, toks["ada"], "bob", 1000000000, "k-f15"), 201,
-              "amount 1e9 boundary valid")
+    expect_error(create_authz(c, toks["ada"], "bob", 1000000000, "k-f16"), 409,
+                 "insufficient_funds", "1e9 refused on funds, not shape (A14 order)")
+    # 1e9 is a shape-valid amount: needs a wallet that can actually afford it,
+    # otherwise the funds check (A14: after shape/existence) correctly refuses.
+    # (A second reset here invalidates the first fixture's tokens, so re-login.)
+    rich = afresh(c, users=STANDARD_USERS + [fuser("u_rich", "rich", 1000000000)])
+    expect_ok(create_authz(c, rich["rich"], "bob", 1000000000, "k-f15"), 201,
+              "amount 1e9 boundary valid for a wallet that can afford it")
 
 
 def test_a14_precedence_shape_before_existence_before_self_before_funds(c):
     toks = afresh(c)
     expect_error(create_authz(c, toks["cy"], "ghost", 15.5, "k-p1"), 422,
                  "validation_failed", "field shape before 404")
-    expect_error(create_authz(c, toks["cy"], "cy", 1000000001, "k-p2"), 422,
+    # cy's available is 0: a funds-refused amount, but self_payment (A14:
+    # existence/self before funds) wins
+    expect_error(create_authz(c, toks["cy"], "cy", 500000, "k-p2"), 422,
                  "self_payment", "existence/self before funds (A14)")
 
 
@@ -330,7 +338,8 @@ def test_r142_r143_r144_default_final_capture(c):
     ada, bob = get_me(c, toks["ada"]), get_me(c, toks["bob"])
     eq(ada["total"], payer_total - 1500, "capture moves money (R120)")
     eq(ada["held"], 0, "hold fully released")
-    eq(ada["available"], payer_total - 500, "500 of 2000 returned to available (R144)")
+    eq(ada["available"], payer_total - 1500,
+       "available = total after capture: hold fully released (R144)")
     eq(bob["total"], 50000 + 1500, "receiver credited")
 
 
@@ -498,8 +507,8 @@ def test_r148_r149_void(c):
     eq(get_me(c, toks["ada"])["total"], payer_total, "void moved no money (R121)")
     v2 = expect_ok(void_authz(c, toks["ada"], aid), 200, "repeat void")
     eq(v2["status"], "voided", "voiding voided is 200 (R148)")
-    expect_error(void_authz(c, toks["bob"], aid), 409,
-                 "authorization_not_open", "voiding a voided one from receiver: not open")
+    expect_error(void_authz(c, toks["bob"], aid), 403, "forbidden",
+                 "receiver voiding: permission (403) precedes state per A14")
     aid2 = _open(c, toks, 500, "k-o15")["authorization_id"]
     expect_ok(capture(c, toks["bob"], aid2, "k-c31", {"amount": 500}), 201, "close")
     expect_error(void_authz(c, toks["ada"], aid2), 409,
@@ -551,13 +560,21 @@ def test_r150_list_envelope_filters_paging(c):
     time.sleep(1.1)
     auth3 = expect_ok(create_authz(c, toks["bob"], "ada", 100, "k-L3"), 201, "")
     items = get_authz_list(c, toks["ada"])
-    eq([a["authorization_id"] for a in items],
+    eq([a["authorization_id"] for a in items[:3]],
        [auth3["authorization_id"], auth2["authorization_id"], auth1["authorization_id"]],
-       "newest first by created_at (R150)")
+       "newest first by created_at (R150): API-created head")
+    eq({a["authorization_id"] for a in items},
+       {auth1["authorization_id"], auth2["authorization_id"], auth3["authorization_id"],
+        "a_l1", "a_l2", "a_l3"},
+       "seeded authorizations involving the caller are included (R149)")
     out = get_authz_list(c, toks["ada"], direction="outgoing")
     check(all(a["from_handle"] == "ada" for a in out), "outgoing = caller is payer")
+    eq({a["authorization_id"] for a in out},
+       {auth1["authorization_id"], auth2["authorization_id"], "a_l1", "a_l3"}, "")
     inc = get_authz_list(c, toks["ada"], direction="incoming")
     check(all(a["to_handle"] == "ada" for a in inc), "incoming = caller is receiver")
+    eq({a["authorization_id"] for a in inc},
+       {auth3["authorization_id"], "a_l2"}, "")
     for bad in ("sideways", "OUT"):
         expect_error(list_authz(c, toks["ada"], direction=bad), 422, "validation_failed",
                      "bad direction (R70 semantics)")
@@ -572,7 +589,7 @@ def test_r150_list_envelope_filters_paging(c):
     page = expect_ok(list_authz(c, toks["ada"], limit=2, offset=0), 200, "page 1")
     eq(len(page["authorizations"]), 2, "limit respected")
     eq(page["has_more"], True, "has_more when more exist")
-    page2 = expect_ok(list_authz(c, toks["ada"], limit=2, offset=2), 200, "page 2")
+    page2 = expect_ok(list_authz(c, toks["ada"], limit=2, offset=4), 200, "last page")
     eq(page2["has_more"], False, "has_more false at end")
 
 
@@ -589,7 +606,8 @@ def test_r150_r151_status_filters_and_lazy_expiry(c):
                    for a in get_authz_list(c, toks["ada"], status="expired")}
     check("a_s3" in expired_ids, "clock-expired matches expired (R151)")
     all_ids = {a["authorization_id"] for a in get_authz_list(c, toks["ada"])}
-    eq(all_ids, {"a_s1", "a_s2", "a_s3"}, "only authorizations involving caller (R149)")
+    eq(all_ids, {"a_s1", "a_s2", "a_s3", "a_s4"},
+       "only authorizations involving the caller, payer or receiver (R149)")
     bob_ids = {a["authorization_id"] for a in get_authz_list(c, toks["bob"])}
     eq(bob_ids, {"a_s1", "a_s2", "a_s4"}, "caller as receiver sees their side")
 

@@ -19,6 +19,9 @@ FIXTURE = json.load(open(os.path.join(HERE, "fixtures", "stage1_upgrade.json")))
 def _import_v1(c):
     r = c.import_state(FIXTURE["export"])
     eq(r.status, 204, "stage-1 format_version:1 export accepted (R115)")
+    # R116/A28: the browser signed in before the upgrade carries its session
+    # cookie across the import boundary
+    c.prime_session(FIXTURE["tokens"]["ada"])
 
 
 def test_r115_import_stage1_export(c):

@@ -159,7 +159,17 @@ class Client:
 
     def token_for(self, handle):
         r = self.login(f"{handle}@example.com")
-        return expect_ok(r, 200, f"login {handle}").get("token")
+        token = expect_ok(r, 200, f"login {handle}").get("token")
+        self.prime_session(token)
+        return token
+
+    def prime_session(self, token):
+        """A28: authenticated page routes authenticate via a session cookie
+        (`pocketful_token`, the bearer token URL-encoded) that the page's
+        client script sets after login/signup — the server never sends
+        Set-Cookie. A pure-HTTP client mirrors that contract here; the JSON
+        API keeps its bearer-token contract unchanged."""
+        self.cookie = f"pocketful_token={urllib.parse.quote(token, safe='')}"
 
 
 # -- fixtures --

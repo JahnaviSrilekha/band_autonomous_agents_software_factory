@@ -8,7 +8,8 @@ from client import (
     check, eq, expect_ok, get_me, fauthz, afresh, fuser, make_payment,
     create_authz, capture, rfc3339,
 )
-from dom import dom_of, require, forbid, has_label, anchors, external_refs
+from dom import (dom_of, require, forbid, has_label, anchors, external_refs,
+                 assert_shown, assert_not_shown)
 
 UI_USERS = [fuser("u_ada", "ada", 100000), fuser("u_bob", "bob", 50000),
             fuser("u_cy", "cy", 0), fuser("u_dee", "dee", 0)]
@@ -18,6 +19,10 @@ FORM_INPUT_TAGS = ("input", "select", "textarea")
 
 
 def page(c, path, token=None):
+    """Fetch a page as a specific browser actor would see it (A28: the page
+    session is the pocketful_token cookie the client script sets after
+    login). token=None models a signed-out browser."""
+    c.prime_session(token) if token else setattr(c, "cookie", None)
     return dom_of(c.get(path, token=token, headers={"Accept": "text/html"}))
 
 
@@ -127,21 +132,21 @@ def test_r103_formatted_amount_minor_units_0_and_3(c):
 def test_r105_activity_feed(c):
     toks = afresh(c, users=UI_USERS)
     p1 = expect_ok(make_payment(c, toks["ada"], "bob", 1000, "ui-p1",
-                                note="lunch"), 201, "pay")
+                                note="lunch", visibility="private"), 201, "pay")
     import time
     time.sleep(1.1)
     p2 = expect_ok(make_payment(c, toks["bob"], "cy", 750, "ui-p2",
                                 note="rent", visibility="private"), 201, "pay")
     time.sleep(1.1)
     p3 = expect_ok(make_payment(c, toks["ada"], "cy", 2500, "ui-p3",
-                                note=""), 201, "pay")
+                                note="", visibility="private"), 201, "pay")
     d = page(c, "/", toks["ada"])
     ids = [el.attr("data-testid").rsplit("-", 1)[-1]
            for el in d.find_all_testid_prefix("activity-item-")]
     eq(ids, [p3["payment_id"], p1["payment_id"]],
        "newest first in DOM; third-party private payment hidden (R26/R105)")
     it1 = require(d, f"activity-item-{p1['payment_id']}", "/")
-    eq(it1.attr("data-visibility"), "public", "data-visibility attribute")
+    eq(it1.attr("data-visibility"), "private", "data-visibility attribute")
     parties = require(d, f"activity-parties-{p1['payment_id']}", "/").text()
     check("ada" in parties and "bob" in parties, "parties contain both handles")
     eq(require(d, f"activity-amount-{p1['payment_id']}", "/").text(), "10.00 EUR",
@@ -150,15 +155,21 @@ def test_r105_activity_feed(c):
     eq(require(d, f"activity-note-{p3['payment_id']}", "/").text(), "",
        "note element present even when empty (R105)")
     require(d, "activity-list", "feed container present")
-    forbid(d, "empty-activity", "feed non-empty for ada")
+    assert_not_shown(d, "empty-activity", "feed non-empty for ada")
     dbob = page(c, "/", toks["bob"])
     require(dbob, f"activity-item-{p2['payment_id']}", "/")
     eq(require(dbob, f"activity-item-{p2['payment_id']}",
-               "/").attr("data-visibility"), "private", "")
+               "/").attr("data-visibility"), "private", "party sees own private item")
+    check(dbob.find_testid(f"activity-item-{p3['payment_id']}") is None,
+       "bob is not a party to p3 (ada→cy, private): excluded (R26)")
     ddee = page(c, "/", toks["dee"])
     require(ddee, "empty-activity", "dee sees nothing (R26)")
+    check(require(ddee, "empty-activity", "/").text(),
+          "empty state has considered content (R99)")
     check(not ddee.find_all_testid_prefix("activity-item-"),
-          "empty-activity shown instead of the list (R105)")
+          "no items for a caller with nothing visible (R105)")
+    assert_shown(ddee, "empty-activity",
+                 "empty-activity shown instead of the list when nothing is visible")
 
 
 def test_r106_equal_timestamps_either_order(c):
@@ -198,7 +209,7 @@ def test_r107_requests_screen(c):
     eq(require(d, f"request-amount-{rq_in['request_id']}", "").text(), "30.00 EUR",
        "formatted amount (R103)")
     forbid(d, "request-error", "no error before refusal")
-    forbid(d, "empty-requests", "lists not both empty")
+    assert_not_shown(d, "empty-requests", "lists not both empty")
     expect_ok(c.post(f"/requests/{rq_in['request_id']}/pay", body={},
                      token=toks["ada"], headers={"Idempotency-Key": "ui-rp1"}),
               201, "pay")
@@ -214,12 +225,12 @@ def test_r107_requests_screen(c):
 def test_r107_empty_requests_iff_both_empty(c):
     toks = afresh(c, users=UI_USERS)
     d = page(c, "/requests", toks["dee"])
-    require(d, "empty-requests", "both lists empty")
+    assert_shown(d, "empty-requests", "both lists empty")
     expect_ok(c.post("/requests", body={"payer_handle": "bob", "amount": 100},
                      token=toks["dee"], headers={"Idempotency-Key": "ui-r3"}),
               201, "outgoing")
     d = page(c, "/requests", toks["dee"])
-    forbid(d, "empty-requests", "only one list empty (R107)")
+    assert_not_shown(d, "empty-requests", "only one list empty (R107)")
 
 
 def test_r108_split_elements(c):

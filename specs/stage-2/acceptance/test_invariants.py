@@ -82,6 +82,7 @@ def test_r121_r122_r123_r157_mixed_concurrent_storm(c):
         return lambda: _no5xx(make_payment(c, t, to, amt, new_key()), "pay")
 
     def op_payment_replay(h):
+        t = toks[h]
         to = rng.choice([x for x in HANDLES if x != h])
         amt = rng.randint(1, 100)
         key = new_key()
@@ -243,7 +244,7 @@ def test_r3_r52_r157_concurrent_identical_exactly_once_seven_paths(c):
     # 1. POST /payments
     burst(lambda i: c.post("/payments", body={"to_handle": "bob", "amount": 300},
                            token=ada, headers={"Idempotency-Key": "eo-pay"}))
-    eq(get_me(c, bob)["total"], 800000 + 300, "money moved exactly once")
+    eq(get_me(c, toks["bob"])["total"], 800000 + 300, "money moved exactly once")
 
     # 2. POST /requests
     burst(lambda i: c.post("/requests", body={"payer_handle": "ada", "amount": 120},
@@ -256,7 +257,7 @@ def test_r3_r52_r157_concurrent_identical_exactly_once_seven_paths(c):
     rid = rqs["requests"][0]["request_id"]
     burst(lambda i: c.post(f"/requests/{rid}/pay", body={},
                            token=ada, headers={"Idempotency-Key": "eo-rpay"}))
-    eq(get_me(c, bob)["total"], 800000 + 300 + 120, "request paid exactly once")
+    eq(get_me(c, toks["bob"])["total"], 800000 + 300 + 120, "request paid exactly once")
     rqs = expect_ok(c.get("/requests?direction=outgoing", token=bob), 200, "")
     eq([r["status"] for r in rqs["requests"] if r["request_id"] == rid][0],
        "paid", "request paid once")
@@ -283,14 +284,14 @@ def test_r3_r52_r157_concurrent_identical_exactly_once_seven_paths(c):
     outs = expect_ok(c.get("/authorizations?direction=outgoing", token=ada),
                      200, "")["authorizations"]
     eq(len([a for a in outs if a["amount"] == 600]), 1, "one authorization created")
-    eq(get_me(c, ada)["held"], 600, "hold placed exactly once")
+    eq(get_me(c, toks["ada"])["held"], 600, "hold placed exactly once")
     aid = [a for a in outs if a["amount"] == 600][0]["authorization_id"]
 
     # 7. POST /authorizations/{id}/capture
     burst(lambda i: c.post(f"/authorizations/{aid}/capture",
                            body={"amount": 250, "final": False},
                            token=bob, headers={"Idempotency-Key": "eo-cap"}))
-    eq(get_me(c, bob)["total"], 800000 + 300 + 120 + 250, "captured money moved once")
+    eq(get_me(c, toks["bob"])["total"], 800000 + 300 + 120 + 250, "captured money moved once")
     a = [a for a in expect_ok(c.get("/authorizations", token=ada), 200, "")
          ["authorizations"] if a["authorization_id"] == aid][0]
     eq(a["captured_amount"], 250, "captured once (R123)")
@@ -303,18 +304,20 @@ def test_r123_r157_concurrent_capture_oversubscribe(c):
     aid = auth["authorization_id"]
     N = 50
     results = run_concurrently([
-        lambda i=i: capture(c, toks["bob"], aid, f"ov-{i}", {"amount": 300})
+        lambda i=i: capture(c, toks["bob"], aid, f"ov-{i}", {"amount": 300, "final": False})
         for i in range(N)])
     ok = [r for r in results if r.status == 201]
     exceeded = [r for r in results if r.status == 422]
-    eq(len(ok) + len(exceeded), N, "only 2xx/422 outcomes")
-    eq(len(ok), 3, "300x4 > 1000, so exactly three captures succeed")
+    closed = [r for r in results if r.status == 409]
+    eq(len(ok) + len(exceeded) + len(closed), N, "only 2xx/409/422 outcomes")
+    eq(len(ok), 3, "300x4 > 1000, so exactly three partial captures succeed (final:false)")
     eq(len(exceeded), N - 3, "rest rejected capture_exceeds_authorization")
-    a = [a for a in expect_ok(c.get("/authorizations", token=ada), 200, "")
+    a = [a for a in expect_ok(c.get("/authorizations", token=toks["ada"]), 200, "")
          ["authorizations"] if a["authorization_id"] == aid][0]
     eq(a["captured_amount"], 900, "cumulative captures bounded by amount (R123)")
     eq(len(a["payment_ids"]), 3, "each idempotent capture moved money once")
-    eq(get_me(c, bob)["total"], 800000 + 900, "conservation")
+    eq(a["remaining_amount"], 100, "remainder still held (final:false)")
+    eq(get_me(c, toks["bob"])["total"], 800000 + 900, "conservation")
 
 
 def test_r121_r122_concurrent_authorize_vs_spend(c):
@@ -342,7 +345,7 @@ def test_r121_r122_concurrent_authorize_vs_spend(c):
 
 
 def test_stage1_r76_rounding_table_unchanged(c):
-    toks = afresh(c)
+    toks = afresh(c, users=STORM_USERS)  # five participants + operator
     cases = [
         (1000, ["ada", "bob", "cy"], [334, 333, 333]),
         (1, ["ada", "bob", "cy"], [1, 0, 0]),

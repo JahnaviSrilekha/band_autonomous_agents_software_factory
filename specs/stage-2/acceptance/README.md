@@ -20,13 +20,18 @@ started container.
 By default the suite first re-runs the stage-1 acceptance modules
 (`specs/stage-1/acceptance/test_*.py`, unmodified) against this service —
 stage-1 requirements remain in force by reference, so a stage-2 regression of
-any stage-1 flow fails here. Latest evidence (branch `tester-stage2`,
-commit `bff735b`, against main `2db982d` with T20/T21 merged): stage-1
-regression 94/94 PASS; stage-2 13/83 PASS — the T20/T21 behaviours (fixture
-seeding/validation, `GET /me` holds) are green, and the failures are the
-not-yet-implemented T22-T33 endpoints/routes plus one genuine finding
-(A22's contradictory-seed reset validation currently accepts a
-contradictory fixture — `test_a22_contradictory_seeds_rejected`).
+any stage-1 flow fails here. Two documented stage-2 deltas supersede nine
+stage-1 assertions (stage-2 exports `format_version: 2` per ADR-006; the
+payment shape gains `authorization_id` per R143) — the runner skips exactly
+those with the sanctioning requirement as the recorded reason (`SKIP` lines;
+the stage-1 folder itself is accepted history and stays unedited).
+
+Latest evidence (branch `tester-stage2`, fix pass after verification): run
+against the verified stage-2 implementation — **168 passed, 0 failed, 9
+skipped** (the sanctioned deltas above). Session priming follows A28: the
+client mirrors the `pocketful_token` cookie contract that the page script
+establishes, so pure-HTTP UI checks observe authenticated server-rendered
+pages exactly as the harness's DOM driver does.
 
 ## Coverage
 
