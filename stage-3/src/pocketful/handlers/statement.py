@@ -82,7 +82,9 @@ def get_statement(user, body, params, query):
             }
         from_dt = _instant_param(query, "from")
         to_dt = _instant_param(query, "to")
-        known_at = _instant_param(query, "known_at")
+        known_raw = query_value(query, "known_at")
+        known_at = (parse_rfc3339(known_raw, "known_at", require_offset=True)
+                    if known_raw is not None else None)
         limit, offset = parse_limit_offset(query)
         now = state_module.now_dt()
         to = to_dt if to_dt is not None else now
@@ -97,10 +99,13 @@ def get_statement(user, body, params, query):
             "resolved_to": to.isoformat(),
         }
         page, has_more = _paged(entries, limit, offset)
-        return 200, {
+        payload = {
             "opening_balance": opening,
             "entries": page,
             "closing_balance": closing,
             "has_more": has_more,
             "snapshot": token,
         }
+        if known_raw is not None:
+            payload["known_at"] = known_raw
+        return 200, payload

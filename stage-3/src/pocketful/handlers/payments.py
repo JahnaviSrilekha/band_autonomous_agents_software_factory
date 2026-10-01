@@ -10,7 +10,7 @@ def payment_json(state, payment):
         "from_handle": state.users[payment.from_user_id].handle,
         "to_user_id": payment.to_user_id,
         "to_handle": state.users[payment.to_user_id].handle,
-        "amount": payment.amount,
+        "amount": payment.revisions[0].amount,
         "currency": state.currency,
         "note": payment.note,
         "visibility": payment.visibility,
