@@ -16,9 +16,9 @@ concurrency, retry, time, compatibility, interface.
   `GET /activity`, `GET /requests`, `POST /splits`, settlements, captures, `GET /statement`)
   carries `created_at` as an RFC 3339 instant with an explicit offset.
 - **R159** (time, compatibility). "`GET /activity` retains its existing ordering by this
-  field." — Acceptance: stage-1's `GET /activity` ordering rule (newest/oldest per stage-1
-  R57-R60) is unchanged and keyed on `created_at`, unaffected by corrections (R206 below
-  keeps corrections out of the feed).
+  field." — Acceptance: stage-1's `GET /activity` ordering rule (stage-1 R75, same-timestamp
+  either order per stage-2 R106) is unchanged and keyed on `created_at`, unaffected by
+  corrections (R204 below keeps corrections out of the feed).
 - **R160** (behaviour, time). "Seeded payments may supply `created_at`; omission uses reset
   time, before subsequent API-created payments." — Acceptance: a reset fixture's payment
   entries accept an optional `created_at`; when absent, the loader assigns the reset instant;
@@ -51,16 +51,20 @@ concurrency, retry, time, compatibility, interface.
 - **R165** (behaviour, time). "With it, `balance` is the caller's balance as it stood at that
   instant: the balance after every payment of theirs with `created_at` at or before `as_of`,
   and before every payment after it. A payment made at exactly `as_of` counts as having
-  happened." — Acceptance: `balance` at `as_of` equals the opening balance plus the net effect
-  of every one of the caller's payments whose `created_at <= as_of`; a payment with
-  `created_at == as_of` is included.
+  happened." — Acceptance: for an uncorrected payment `balance` at `as_of` equals the opening
+  balance plus the net effect of every one of the caller's payments whose `created_at <=
+  as_of`, with `created_at == as_of` included; once a payment has been corrected, its selected
+  revision's `effective_at` governs inclusion instead of `created_at` — see A34.
 - **R166** (behaviour, time). "An `as_of` at or after the latest payment returns the current
   balance." — Acceptance: an `as_of` at or after the caller's most recent payment's
-  `created_at` yields the same `balance` as a plain (no `as_of`) request.
+  `created_at` (or, once any correction exists, at or after the latest selected `effective_at`
+  among the caller's payments — A34) yields the same `balance` as a plain (no `as_of`) request.
 - **R167** (behaviour, time). "An `as_of` before the earliest payment returns the opening
   balance — what the wallet held before anything moved." — Acceptance: an `as_of` earlier
-  than the caller's first payment returns the account's opening balance (R181/R182 define how
-  opening balances are derived), independent of any payment.
+  than the caller's first payment's `created_at` (or, once any correction exists, earlier than
+  the earliest selected `effective_at` among the caller's payments — A34) returns the account's
+  opening balance (R181/R182 define how opening balances are derived), independent of any
+  payment.
 - **R168** (interface, time). "The response carries `as_of` back, exactly as given." —
   Acceptance: a `GET /me?as_of=X` response includes `as_of` equal to the exact string `X`
   from the request (not reformatted/re-serialized).
@@ -86,15 +90,16 @@ concurrency, retry, time, compatibility, interface.
   `delta` and `balance_after` alongside it. (No `from`/`to` echo is required — the response
   shape example shows none; see A31.)
 - **R173** (behaviour, limit). "1. Entries are ordered by `created_at` ascending, then
-  payment `id` ascending for ties." — Acceptance: for two entries with equal `created_at`,
-  the one with the lexicographically/numerically smaller `id` (per stage-1's id ordering
-  convention) appears first.
+  payment `id` ascending for ties." — Acceptance: for two entries with equal `created_at` (or,
+  once corrected, equal selected `effective_at` — A34/R215), the one with the lexicographically
+  smaller `id` string (A37) appears first.
 - **R174** (behaviour, time). "2. `opening_balance` is the balance immediately before `from`.
   `closing_balance` is the balance immediately before `to`." — Acceptance: `opening_balance`
   equals the caller's balance computed the same way as R165 at instant `from` but *excluding*
-  any payment with `created_at == from` (immediately before, not at-or-before); `closing_balance`
-  is the same computed at `to`, excluding any payment at exactly `to` (consistent with the
-  half-open `[from, to)` window of R172).
+  any payment with `created_at == from` (or selected `effective_at == from` once corrected —
+  A34) (immediately before, not at-or-before); `closing_balance` is the same computed at `to`,
+  excluding any payment at exactly `to` (consistent with the half-open `[from, to)` window of
+  R172).
 - **R175** (concurrency, limit). "3. `opening_balance` plus all `delta` values in the full
   window must equal `closing_balance`. A sent payment has a negative `delta`; a received
   payment has a positive `delta`." — Acceptance: statement invariant — summing every entry's
@@ -177,9 +182,11 @@ concurrency, retry, time, compatibility, interface.
   are absent from the correction body and untouched by its effect.
 - **R192** (interface, behaviour). "It appends an immutable revision, returning 201 with
   `payment_id`, `revision`, `amount`, `effective_at`, server-assigned `recorded_at`, and
-  `reason`." — Acceptance: a successful correction returns 201 with exactly these fields;
-  `revision` is `expected_revision + 1`; `recorded_at` is server-assigned (not client-supplied)
-  and is an RFC 3339 instant.
+  `reason`." — Acceptance: a successful correction returns 201 whose body includes at least
+  `payment_id`, `revision`, `amount`, `effective_at`, `recorded_at`, `reason` with correct
+  values (the source shows no worked example body, so exclusivity is not asserted — A31's
+  "test only what the source requires" principle); `revision` is `expected_revision + 1`;
+  `recorded_at` is server-assigned (not client-supplied) and is an RFC 3339 instant.
 - **R193** (time, concurrency). "Recorded times for one payment strictly increase." —
   Acceptance: for any payment, revision N+1's `recorded_at` is strictly later than revision
   N's `recorded_at`, for every N, even under concurrent correction attempts (only one can
@@ -270,9 +277,13 @@ concurrency, retry, time, compatibility, interface.
   the instant the request started processing — i.e. the latest revision of every payment,
   which matches current behavior (R164).
 - **R210** (behaviour, time). "Then apply selected revisions according to their effective
-  times." — Acceptance: once a revision is selected per payment (R208), its contribution to
-  balance/statement computations is ordered and evaluated by its `effective_at`, not its
-  `recorded_at` or the payment's `created_at`.
+  times." — Acceptance: once a revision is selected per payment (R208, including the no-
+  `known_at` case, which selects the latest revision), its contribution to balance/statement
+  computations is ordered and evaluated by its `effective_at`, not its `recorded_at` or the
+  payment's `created_at`. This is the general rule for any payment with more than one
+  revision, not limited to requests that explicitly supply `known_at` — see A34, which
+  reconciles this against R165-R167/R174's `created_at` wording (the uncorrected special
+  case, where `effective_at == created_at` for revision 1).
 - **R211** (compatibility, behaviour). "`as_of` retains its inclusive meaning; a statement
   retains its half-open window." — Acceptance: combining `known_at` with `as_of` (R165's
   at-or-before, inclusive-at-exact-instant rule) or with `from`/`to` (R172's half-open
@@ -310,7 +321,9 @@ concurrency, retry, time, compatibility, interface.
   revisions — exactly one entry per payment per statement read, for its selected revision.
 - **R220** (compatibility). "With no corrections and no `known_at`, previous behavior is
   unchanged." — Acceptance: a payment never corrected, read without `known_at`, produces
-  statement/`GET /me` results identical to R158-R177's uncorrected behavior.
+  statement/`GET /me` results identical to R158-R177's uncorrected behavior (A34: for an
+  uncorrected payment, revision 1's `effective_at == created_at`, so R210's effective-time
+  rule and R165-R167/R174's `created_at` wording agree by construction).
 
 ## Stable statement pagination
 
@@ -338,7 +351,9 @@ concurrency, retry, time, compatibility, interface.
 - **R226** (limit, compatibility). "Tokens last until reset. No storage survival across
   container restarts is required." — Acceptance: a snapshot token remains valid for the
   remainder of the current reset epoch; it need not survive a process/container restart
-  (in-memory storage, consistent with stage-1 design §1's overall in-memory model).
+  (in-memory storage, consistent with stage-1 design §1's overall in-memory model). An
+  import (`POST /_test/import`) also starts a fresh epoch and invalidates every outstanding
+  snapshot token the same way a reset does — see A38.
 - **R227** (limit, interface). "Paging changes neither balances nor entries; the final
   partial page and offsets beyond the end must report `has_more` correctly." — Acceptance:
   paging a snapshot (or a live, non-snapshot window) never mutates state; the last partial
@@ -346,7 +361,10 @@ concurrency, retry, time, compatibility, interface.
   `entries` list with `has_more: false`.
 - **R228** (compatibility). "Unrecognized query parameters remain ignored under stage 1's
   general rule." — Acceptance: stage-1's "ignore unknown query parameters" rule continues to
-  apply to `GET /statement` (and `GET /me`) for any parameter not named in this document.
+  apply to `GET /statement` (and `GET /me`) for any parameter not named *for that endpoint* in
+  this document — see A36 for the per-endpoint scoping this requires (e.g. `as_of` is named
+  for `GET /me`, not `GET /statement`; `from`/`to`/`snapshot` are named for `GET /statement`,
+  not `GET /me`) and its interaction with R224's snapshot-specific 422 rule.
 - **R229** (behaviour, time). "A correction may move a payment into or out of a statement
   window." — Acceptance: re-querying a live (non-snapshot) statement window after a
   correction changes a payment's selected `effective_at` can add or remove that payment from
@@ -441,7 +459,10 @@ concurrency, retry, time, compatibility, interface.
   Acceptance: a seeded authorization's creation event time, for historical purposes, is the
   reset instant unless the fixture supplies `created_at`; a seeded already-closed hold
   (captured/voided) need not have a synthetic creation-then-close history reconstructed — its
-  `closed_at`/state may be taken as given without an earlier "open" interval being modeled.
+  `closed_at`/state may be taken as given without an earlier "open" interval being modeled. A
+  supplied `created_at` becomes the authorization's visible `created_at` (ordering position in
+  `GET /authorizations`, stage-2 R150, carried forward); a future-dated supplied `created_at`
+  is rejected the same way as a future seeded payment `created_at` — see A35.
 - **R249** (behaviour, interface). "`GET /statement` still contains money movements only:
   authorization, release and expiry are not payments." — Acceptance: a statement's `entries`
   never include a hold-only event (creation, void, expiry) that did not move money; only
@@ -463,9 +484,10 @@ concurrency, retry, time, compatibility, interface.
   seeded-balance rule (stage-1 R15/A13) and stage-2's seeded-authorization-validation errors
   (A22) — both reject the whole reset/import with 422 `validation_failed` and no state change.
   Assumption: a fixture whose seeded payment history, replayed in `created_at` order from each
-  account's zero/declared opening point, would make any account negative at any point is
-  rejected 422 `validation_failed` from `POST /_test/reset` (or import), with no state change,
-  same as R161's future-`created_at` case.
+  account's opening balance (R180 — not zero, and not the fixture's declared ending `balance`),
+  would make any account negative at any point is rejected 422 `validation_failed` from
+  `POST /_test/reset` (or import), with no state change, same as R161's future-`created_at`
+  case.
 - **A30**. The spec does not state what revision/timestamp history an imported stage-1 or
   stage-2 export's payments receive, since those formats have no revision concept. Reasoning:
   R178/R179 define revision 1's `effective_at`/`recorded_at` as equal to `created_at`; an
@@ -506,3 +528,62 @@ concurrency, retry, time, compatibility, interface.
   stage-3.md, and stage-1/2 only impose limits where explicitly written. Assumption: no
   additional limit beyond what's stated; a payment may be corrected arbitrarily many times
   within a run, each appending one more revision.
+- **A34** (tester completeness review, round 1 — substantive). R165/R166/R167/R174's
+  acceptances key historical inclusion/ordering on `created_at`, mirroring the source's
+  `as_of` section wording; but the source's `known_at` section states inclusion/ordering is
+  governed by each selected revision's **effective** time (R210/R211/R215), with no lower
+  bound stated on `effective_at` relative to `created_at` (R189 only bounds it above, "not
+  later than now"). A payment corrected to an `effective_at` before or after its own
+  `created_at` therefore makes the two sections' literal wording disagree about inclusion in
+  an `as_of`/statement window that falls between the two instants. Reasoning: R210's "apply
+  selected revisions according to their effective times" is stated as the general rule for
+  how a selected revision contributes, not conditioned on `known_at` having been explicitly
+  supplied (R208's selection function returns the latest revision when `known_at` is
+  omitted, and that revision still has an `effective_at`); treating `created_at` as the only
+  ever-relevant instant would make an `effective_at`-backdated correction's historical effect
+  unreachable by any query, contradicting the section's evident purpose. Conservative
+  reconciliation: `created_at`-keyed wording (R165-R167, R173, R174, R175's ordering,
+  R215's "previous" ordering, R220) describes the **uncorrected** case, where revision 1's
+  `effective_at == created_at` makes the two readings agree by construction; once a payment
+  has any correction, its **selected revision's `effective_at`** (per R208's selection,
+  defaulting to the latest revision when `known_at` is omitted) governs inclusion and
+  ordering everywhere `created_at` is named in these sections, and R166/R167's "latest
+  payment"/"earliest payment" mean the caller's latest/earliest *selected `effective_at`*
+  among their payments, not latest/earliest `created_at`. The suite asserts the
+  `created_at`-literal behavior for uncorrected payments (matching R165-R167 as written) and
+  the effective-time rule for corrected ones (matching R210 as written); it does not assert
+  a case where the two readings would conflict without this resolution.
+- **A35** (tester completeness review, round 1). A seeded authorization's `created_at`
+  (R248) has no stated validation or ordering-effect rule. Reasoning: same family as R161's
+  seeded-payment `created_at` rule, and consistent with stage-2 R150's `GET /authorizations`
+  ordering already depending on `created_at`. Assumption: a seeded authorization whose
+  supplied `created_at` is later than the reset instant is rejected 422 `validation_failed`
+  from `POST /_test/reset` (or import), no state change, same as R161; a supplied
+  `created_at` (not just the default-to-reset-instant case) is the value `GET /authorizations`
+  sorts and filters by, same as any other authorization's `created_at`.
+- **A36** (tester completeness review, round 1). R228's "unrecognized query parameters
+  remain ignored" and R224's "only limit and offset may accompany a snapshot" are not
+  reconciled per-endpoint: `as_of` is named only for `GET /me` (not `GET /statement`); `from`,
+  `to` and `snapshot` are named only for `GET /statement` (not `GET /me`). Reasoning: the
+  source never describes `as_of` as meaningful for `GET /statement` or `from`/`to`/`snapshot`
+  as meaningful for `GET /me`; R228's general ignore-rule is the only stated behavior for a
+  parameter not named for that specific endpoint. Assumption: parameter recognition is
+  per-endpoint — `as_of` supplied to `GET /statement` (with or without `snapshot`) is
+  unrecognized and ignored (R228), not a 422; only `from`, `to` or `known_at` supplied
+  alongside `snapshot` on `GET /statement` trigger R224's 422; `from`, `to` or `snapshot`
+  supplied to `GET /me` are unrecognized and ignored (R228).
+- **A37** (tester completeness review, round 1). R173/R215's "payment `id` ascending" tie-
+  break has no recorded comparison rule — stage-1 design only fixes the id *format*
+  (stage-1 design §8) and stage-1 R16 makes ids opaque to the client, not stating an
+  ordering. Assumption: "ascending" means lexicographic (codepoint-wise) ascending comparison
+  of the `id` string, the only ordering derivable from an opaque string without assuming
+  structure the client isn't told about.
+- **A38** (tester completeness review, round 1). The source states snapshot tokens "last
+  until reset" and that a token "from before reset" is 404, but says nothing about
+  `POST /_test/import`. Reasoning: stage-1 R83 already establishes that import atomically
+  replaces all state, same as reset; design.md §3/§8's `reset_epoch` mechanism (ADR-009)
+  already ties snapshot validity to an epoch counter bumped by both reset and import, so
+  treating import as equivalent to reset for this purpose requires no new mechanism, just
+  this recorded assumption. Assumption: `POST /_test/import` invalidates every outstanding
+  snapshot token exactly as `POST /_test/reset` does (a token issued before the most recent
+  reset *or* import is 404 `not_found`).

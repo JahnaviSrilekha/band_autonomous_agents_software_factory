@@ -144,7 +144,7 @@ def is_live_hold_at(a: Authorization, at: datetime, known_at: datetime | None) -
     if created is None:
         return False   # creation itself not yet known at `known_at`
     closed = closed_at(a, known_at)   # None, or the resolved close instant
-    return a.status != "voided_before_creation_known" and (closed is None or closed > at) and created <= at
+    return (closed is None or closed > at) and created <= at
 ```
 
 (The `is_live_hold_at`/`closed_at` pair collapses to stage-2's existing `is_live_hold` when
