@@ -185,6 +185,44 @@ class TestT54BatchPrecedence(unittest.TestCase):
         status, payload, _ = self.batch(items, "k-offset")
         self.assertEqual(status, 201, payload)
 
+    def test_stale_revision_beats_refund_floor(self):
+        # staleness (409) is checked before the refund floor (422) in batch
+        # items, matching the single-correction endpoint (design sec6/sec7)
+        p = self.pay(self.ada, "k-stale-floor", "bob", 500)
+        status, payload, _ = base.request(self.port, "POST",
+                                          f"/payments/{p}/refunds",
+                                          body={"amount": 200},
+                                          headers={**self.bob, "Idempotency-Key": "k-ref"})
+        self.assertEqual(status, 201, payload)
+        status, payload, _ = self.batch([self.item(p, 100, expected_revision=9)],
+                                        "k-stale-floor-item")
+        self.assertEqual(status, 409)
+        self.assertEqual(payload["error"]["code"], "stale_revision")
+
+    def test_fresh_revision_floor_violation_still_422(self):
+        p = self.pay(self.ada, "k-fresh-floor", "bob", 500)
+        status, payload, _ = base.request(self.port, "POST",
+                                          f"/payments/{p}/refunds",
+                                          body={"amount": 200},
+                                          headers={**self.bob, "Idempotency-Key": "k-ref"})
+        self.assertEqual(status, 201, payload)
+        status, payload, _ = self.batch([self.item(p, 100, expected_revision=1)],
+                                        "k-fresh-floor-item")
+        self.assertEqual(status, 422)
+        self.assertEqual(payload["error"]["code"], "refund_exceeds_payment")
+
+    def test_stale_revision_with_floor_ok_still_409(self):
+        p = self.pay(self.ada, "k-stale-ok", "bob", 500)
+        status, payload, _ = base.request(self.port, "POST",
+                                          f"/payments/{p}/refunds",
+                                          body={"amount": 200},
+                                          headers={**self.bob, "Idempotency-Key": "k-ref"})
+        self.assertEqual(status, 201, payload)
+        status, payload, _ = self.batch([self.item(p, 300, expected_revision=9)],
+                                        "k-stale-ok-item")
+        self.assertEqual(status, 409)
+        self.assertEqual(payload["error"]["code"], "stale_revision")
+
     def test_rejected_batch_leaves_everything_unchanged(self):
         p1 = self.pay(self.ada, "k-p1", "cy", 1000)
         before = {

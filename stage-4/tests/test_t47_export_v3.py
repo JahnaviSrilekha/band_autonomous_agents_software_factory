@@ -74,10 +74,10 @@ class TestT47ExportV3(unittest.TestCase):
     def import_payload(self, payload):
         return base.request(self.port, "POST", "/_test/import", body=payload)
 
-    def test_export_is_v3_with_revisions(self):
+    def test_export_is_v4_with_revisions(self):
         build_rich_state(self.port)
         exported = self.export()
-        self.assertEqual(exported["format_version"], 3)
+        self.assertEqual(exported["format_version"], 4)
         payments = {p["id"]: p for p in exported["state"]["payments"]}
         self.assertEqual(payments["p_a1"]["revisions"][:1],
                          [{"revision": 1, "amount": 3000,
@@ -208,7 +208,7 @@ class TestT47ExportV3(unittest.TestCase):
     def test_unknown_format_version_422(self):
         build_rich_state(self.port)
         exported = self.export()
-        for version in (0, 4, "3"):
+        for version in (0, 5, "3"):
             payload = copy.deepcopy(exported)
             payload["format_version"] = version
             status, response, _ = self.import_payload(payload)

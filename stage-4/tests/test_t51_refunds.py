@@ -63,6 +63,20 @@ class TestT51Refunds(unittest.TestCase):
         self.assertEqual(status, 400)
         self.assertEqual(payload["error"]["code"], "missing_idempotency_key")
 
+    def test_missing_token_401_before_missing_key_400(self):
+        payment_id = self.pay(self.ada, "k-pay-1")["payment_id"]
+        status, payload, _ = base.request(self.port, "POST",
+                                          f"/payments/{payment_id}/refunds",
+                                          body={"amount": 200})
+        self.assertEqual(status, 401)
+        self.assertEqual(payload["error"]["code"], "unauthenticated")
+        status, payload, _ = base.request(self.port, "POST",
+                                          f"/payments/{payment_id}/refunds",
+                                          body={"amount": 200},
+                                          headers={"Authorization": "Bearer bogus"})
+        self.assertEqual(status, 401)
+        self.assertEqual(payload["error"]["code"], "unauthenticated")
+
     def test_empty_idempotency_key_400(self):
         payment_id = self.pay(self.ada, "k-pay-1")["payment_id"]
         status, payload, _ = self.refund(payment_id, key="")
