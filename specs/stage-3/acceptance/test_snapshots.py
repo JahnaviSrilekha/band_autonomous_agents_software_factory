@@ -110,10 +110,12 @@ def test_r227_paging_no_mutation_has_more(c):
     toks = sfix(c)
     token = statement_ok(c, toks["ada"])["snapshot"]
     before = {h: get_me(c, t)["balance"] for h, t in toks.items()}
-    last = None
-    for offset in (0, 1, 2):
-        last = statement_ok(c, toks["ada"], snapshot=token, limit=1, offset=offset)
-    eq(last["has_more"], False, "final partial page has_more false (R227)")
+    # ada has 2 frozen entries: page size 1 leaves one behind -> has_more True
+    # on every non-final page (R227), regardless of the original read's shape.
+    first = statement_ok(c, toks["ada"], snapshot=token, limit=1, offset=0)
+    eq(first["has_more"], True, "snapshot first page has_more true (R227)")
+    mid = statement_ok(c, toks["ada"], snapshot=token, limit=1, offset=1)
+    eq(mid["has_more"], False, "snapshot final partial page has_more false (R227)")
     beyond = statement_ok(c, toks["ada"], snapshot=token, limit=1, offset=99)
     eq(beyond["entries"], [], "offset beyond end: empty entries (R227)")
     eq(beyond["has_more"], False, "offset beyond end: has_more false (R227)")
