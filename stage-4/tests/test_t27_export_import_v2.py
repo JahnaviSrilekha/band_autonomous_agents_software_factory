@@ -54,7 +54,7 @@ class TestT27ExportImportV2(unittest.TestCase):
     def test_export_is_format_version_2_with_new_fields(self):
         self._build_rich_state()
         payload = self._export()
-        self.assertEqual(payload["format_version"], 3)
+        self.assertEqual(payload["format_version"], 4)
         state = payload["state"]
         self.assertEqual(state["authorization_ttl_seconds"], 600)
         self.assertEqual(len(state["authorizations"]), 4)
@@ -135,7 +135,7 @@ class TestT27ExportImportV2(unittest.TestCase):
     def test_unknown_version_still_422(self):
         base.request(self.port, "POST", "/_test/reset", body=h.BASE_FIXTURE)
         before = self._export()
-        bad = {"track": "pocketful", "format_version": 4, "state": before["state"]}
+        bad = {"track": "pocketful", "format_version": 5, "state": before["state"]}
         status, payload, _ = self._import(bad)
         self.assertEqual(status, 422)
         self.assertEqual(payload["error"]["code"], "validation_failed")

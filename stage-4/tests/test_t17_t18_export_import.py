@@ -81,7 +81,7 @@ class TestExport(unittest.TestCase):
         status, payload, _ = base.request(self.port, "GET", "/_test/export")
         self.assertEqual(status, 200)
         self.assertEqual(payload["track"], "pocketful")
-        self.assertEqual(payload["format_version"], 3)
+        self.assertEqual(payload["format_version"], 4)
         self.assertIsInstance(payload["state"], dict)
 
     def test_export_is_atomic_snapshot(self):

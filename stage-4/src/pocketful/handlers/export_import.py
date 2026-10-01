@@ -27,6 +27,7 @@ def state_to_json(state):
              "visibility": p.visibility, "request_id": p.request_id,
              "settlement_id": p.settlement_id, "effective_at": p.effective_at,
              "recorded_at": p.recorded_at, "authorization_id": p.authorization_id,
+             "refund_of": p.refund_of,
              "revisions": [r.to_json() for r in p.revisions]}
             for p in state.payments
         ],
@@ -132,11 +133,13 @@ def state_from_json(payload, format_version):
             raise ApiError(422, "validation_failed", "each authorization must be an object")
         authorization = _authorization_from_json(state, entry, format_version)
         state.authorizations[authorization.id] = authorization
+    payment_ids_seen = set()
     for entry in _require_list(payload, "payments"):
         if not isinstance(entry, dict):
             raise ApiError(422, "validation_failed", "each payment must be an object")
-        payment = _payment_from_json(state, entry, format_version)
+        payment = _payment_from_json(state, entry, format_version, payment_ids_seen)
         state.payments.append(payment)
+        payment_ids_seen.add(payment.id)
     _apply_imported_opening_balances(state)
     state.reset_epoch += 1
     for entry in _require_list(payload, "splits"):
@@ -276,7 +279,12 @@ def _revisions_from_json(entry):
         reason = item.get("reason", "")
         if not isinstance(reason, str):
             raise ApiError(422, "validation_failed", "revision reason must be a string")
-        revisions.append(Revision(number, amount, effective_at, recorded_at, reason))
+        correction_batch_id = item.get("correction_batch_id")
+        if correction_batch_id is not None and not isinstance(correction_batch_id, str):
+            raise ApiError(422, "validation_failed",
+                           "revision correction_batch_id must be a string or null")
+        revisions.append(Revision(number, amount, effective_at, recorded_at, reason,
+                                  correction_batch_id))
     numbers = [r.revision for r in revisions]
     if numbers != list(range(1, len(numbers) + 1)):
         raise ApiError(422, "validation_failed",
@@ -284,7 +292,7 @@ def _revisions_from_json(entry):
     return revisions
 
 
-def _payment_from_json(state, entry, format_version):
+def _payment_from_json(state, entry, format_version, payment_ids_seen):
     payment_id = _fixture_string(entry, "id")
     from_user_id = _fixture_string(entry, "from_user_id")
     to_user_id = _fixture_string(entry, "to_user_id")
@@ -308,6 +316,12 @@ def _payment_from_json(state, entry, format_version):
     if authorization_id is not None:
         if not isinstance(authorization_id, str) or authorization_id not in state.authorizations:
             raise ApiError(422, "validation_failed", "payment references an unknown authorization")
+    refund_of = entry.get("refund_of")
+    if refund_of is not None:
+        if (not isinstance(refund_of, str) or refund_of == payment_id
+                or refund_of not in payment_ids_seen):
+            raise ApiError(422, "validation_failed",
+                           "payment references an unknown refund target")
     effective_at = entry.get("effective_at")
     recorded_at = entry.get("recorded_at")
     if not isinstance(effective_at, str) or not isinstance(recorded_at, str):
@@ -318,7 +332,7 @@ def _payment_from_json(state, entry, format_version):
     revisions = _revisions_from_json(entry) if format_version >= 3 else None
     return Payment(payment_id, from_user_id, to_user_id, amount, note, visibility,
                    request_id, settlement_id, effective_at, recorded_at, record_seq,
-                   authorization_id, revisions=revisions)
+                   authorization_id, revisions=revisions, refund_of=refund_of)
 
 
 def _split_from_json(state, entry):
@@ -390,7 +404,7 @@ def _idempotency_from_json(state, entry):
 def handle_export(user, body, params, query):
     with STATE_LOCK:
         state = state_module.STATE
-        return 200, {"track": "pocketful", "format_version": 3, "state": state_to_json(state)}
+        return 200, {"track": "pocketful", "format_version": 4, "state": state_to_json(state)}
 
 
 def handle_import(user, body, params, query):
@@ -398,8 +412,8 @@ def handle_import(user, body, params, query):
         raise ApiError(422, "validation_failed", "track must be pocketful")
     version = body.get("format_version")
     if (isinstance(version, bool) or not isinstance(version, (int, float))
-            or version not in (1, 2, 3)):
-        raise ApiError(422, "validation_failed", "format_version must be 1, 2 or 3")
+            or version not in (1, 2, 3, 4)):
+        raise ApiError(422, "validation_failed", "format_version must be 1, 2, 3 or 4")
     payload_state = body.get("state")
     if not isinstance(payload_state, dict):
         raise ApiError(422, "validation_failed", "state is required")
