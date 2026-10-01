@@ -202,7 +202,7 @@ class TestT57ConcurrencyHardening(unittest.TestCase):
         workers.append((correction, (p_a3, 180, self.ada, 11)))
         workers.append((correction, (p_a2, 120, self.ada, 12)))
         workers.append((correction, (p_s1, 60, self.ada, 13)))
-        workers.append((correction, (p_a4, 100, self.bob, 14)))
+        workers.append((correction, (p_a1, 80, self.ada, 14)))
         workers.append((correction, (p_a5, 60, self.cy, 15)))
         workers.append((refund, (p_a3, 30, self.bob, "b-refund-1")))
         workers.append((refund, (p_a2, 40, self.cy, "b-refund-2")))
